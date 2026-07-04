@@ -93,6 +93,9 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 		// cluster sometimes includes it in the comment field, but we already
 		// append our own timestamp at the end of the line.
 		comment = stripTrailingTime(s.Comment)
+		if comment == "" {
+			comment = "DX"
+		}
 	}
 
 	// Standard DX cluster line format:
