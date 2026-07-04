@@ -1,0 +1,15 @@
+# Build output
+ubersdr_dxcluster
+
+# Data directory
+dxcluster_data/
+
+# Go
+*.test
+*.out
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

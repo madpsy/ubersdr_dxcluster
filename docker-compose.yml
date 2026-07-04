@@ -1,0 +1,38 @@
+services:
+  ubersdr_dxcluster:
+    image: madpsy/ubersdr_dxcluster:latest
+    container_name: dxcluster
+    restart: unless-stopped
+    cpu_shares: 512
+    environment:
+      # UberSDR base HTTP URL (SSE streams are fetched over HTTP, not WebSocket)
+      UBERSDR_URL: "http://ubersdr:8080"
+      #
+      # Callsign shown as spotter in telnet DX cluster spots (default: UBERSDR)
+      # SPOTTER_CALL: "UBERSDR"
+      #
+      # Web UI port (default: 6087)
+      # WEB_PORT: "6087"
+      #
+      # DX cluster telnet port (default: 7300)
+      # TELNET_PORT: "7300"
+      #
+      # URL base path for reverse-proxy addon prefix (default: "")
+      # BASE_PATH: ""
+    ports:
+      - "7300:7300"
+    networks:
+      - sdr-network
+    volumes:
+      - ./dxcluster_data:/data
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "dxcluster"
+
+networks:
+  sdr-network:
+    external: true
+    name: ubersdr_sdr-network

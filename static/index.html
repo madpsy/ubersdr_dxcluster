@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📡 UberSDR DX Cluster</title>
+  <script>
+    window.BASE_PATH    = "{{.BasePath}}";
+    window.RX_CALLSIGN  = "{{.Callsign}}";
+    window.RX_NAME      = "{{.Name}}";
+    window.RX_LOCATION  = "{{.Location}}";
+  </script>
+  <link rel="stylesheet" href="{{.BasePath}}/static/style.css">
+</head>
+<body>
+
+<div id="tooltip"></div>
+
+<header>
+  <div class="logo">
+    <span class="logo-icon">📡</span>
+    UberSDR <span>&nbsp;DX Cluster</span>
+  </div>
+  <div class="rx-info" id="rx-info" style="display:none">
+    <span class="rx-call" id="rx-call"></span>
+    <span class="rx-loc" id="rx-loc"></span>
+  </div>
+
+  <div class="conn-pill disconnected" id="conn-decoder">
+    <div class="conn-dot"></div>
+    <span>Digital</span>
+  </div>
+  <div class="conn-pill disconnected" id="conn-cw">
+    <div class="conn-dot"></div>
+    <span>CW</span>
+  </div>
+  <div class="conn-pill disconnected" id="conn-voice">
+    <div class="conn-dot"></div>
+    <span>Voice</span>
+  </div>
+
+  <div class="hdr-spacer"></div>
+
+  <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
+  <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
+  <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
+</header>
+
+<div class="page">
+
+  <!-- Digital Decodes panel -->
+  <div class="card" id="card-decoder">
+    <div class="card-hdr">
+      <span class="icon">📻</span> Digital Decodes
+      <span class="stream-pill stream-decoder">FT8 · FT4 · WSPR · JS8</span>
+      <span class="badge" id="badge-decoder">0 spots</span>
+    </div>
+    <div class="table-wrap" id="wrap-decoder">
+      <table>
+        <thead>
+          <tr>
+            <th>UTC</th>
+            <th>Callsign</th>
+            <th>Freq</th>
+            <th>Mode</th>
+            <th>Band</th>
+            <th>SNR</th>
+            <th>Country</th>
+            <th>Dist</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-decoder">
+          <tr><td colspan="8" class="no-data">Waiting for digital decodes…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CW Skimmer panel -->
+  <div class="card" id="card-cw">
+    <div class="card-hdr">
+      <span class="icon">🔑</span> CW Spots
+      <span class="stream-pill stream-cw">CW Skimmer</span>
+      <span class="badge" id="badge-cw">0 spots</span>
+    </div>
+    <div class="table-wrap" id="wrap-cw">
+      <table>
+        <thead>
+          <tr>
+            <th>UTC</th>
+            <th>Callsign</th>
+            <th>Freq</th>
+            <th>Band</th>
+            <th>SNR</th>
+            <th>WPM</th>
+            <th>Country</th>
+            <th>Dist</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-cw">
+          <tr><td colspan="8" class="no-data">Waiting for CW spots…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Voice Activity panel -->
+  <div class="card" id="card-voice">
+    <div class="card-hdr">
+      <span class="icon">🎙</span> Voice Activity
+      <span class="stream-pill stream-voice">SSB · USB · LSB</span>
+      <span class="badge" id="badge-voice">0 active</span>
+    </div>
+    <div class="table-wrap" id="wrap-voice">
+      <table>
+        <thead>
+          <tr>
+            <th>Updated</th>
+            <th>Callsign</th>
+            <th>Freq</th>
+            <th>Mode</th>
+            <th>Band</th>
+            <th>SNR</th>
+            <th>Conf</th>
+            <th>Country</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-voice">
+          <tr><td colspan="8" class="no-data">Waiting for voice activity…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="voice-footer">
+      <span class="voice-note">Entries expire after 10 minutes of inactivity</span>
+    </div>
+  </div>
+
+</div>
+
+<script src="{{.BasePath}}/static/app.js"></script>
+</body>
+</html>
