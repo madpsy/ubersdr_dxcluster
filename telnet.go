@@ -306,7 +306,7 @@ SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/voice                     Enable voice activity spots (default: on)
   unset/voice                   Disable voice activity spots
 
-  set/dxcluster                 Enable DX cluster spots from DX Spider (default: on)
+  set/dxcluster                 Enable DX cluster spots (default: on)
   unset/dxcluster               Disable DX cluster spots
   set/cluster                   Alias for set/dxcluster
   unset/cluster                 Alias for unset/dxcluster

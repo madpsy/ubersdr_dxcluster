@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -54,19 +55,23 @@ type Spot struct {
 	BearingDeg float64 `json:"bearing_deg,omitempty"`
 }
 
-// FormatDXCluster returns a standard AR-Cluster/DX Spider spot line matching
-// the format used by real skimmer networks (e.g. RBN):
+// FormatDXCluster returns a standard AR-Cluster/DX Spider spot line.
 //
-//	DX de MM9PSY-#:  14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
+// For our own skimmer spots (digital/CW/voice) the receiver's callsign
+// with "-#" suffix is used as the spotter (RBN convention).
 //
-// For StreamDXCluster spots the original spotter callsign is used as-is.
-// For all other streams the receiver's callsign with "-#" suffix is used.
+// For StreamDXCluster spots the original spotter callsign from the upstream
+// cluster is preserved, and the comment is passed through as-is:
+//
+//	DX de DK8MM:    144337.0  DM4KCS/P     JO53 > JO30JM                  1748Z
+//	DX de M9PSY-#:   14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
 func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 	var spotter string
 	if s.Stream == StreamDXCluster && s.Spotter != "" {
+		// Real DX cluster spot — use the original spotter as-is
 		spotter = s.Spotter
 	} else {
-		// Skimmer callsigns use "-#" suffix by convention
+		// Our own skimmer spots — use receiver callsign with "-#" suffix
 		spotter = defaultSpotter + "-#"
 	}
 
@@ -80,16 +85,18 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 	case StreamDecoder:
 		comment = fmt.Sprintf("%s %d dB", s.Mode, int(s.SNR))
 	case StreamCWSkimmer:
-		cwComment := s.Comment
-		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, cwComment)
+		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, s.Comment)
 	case StreamVoiceActivity:
 		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
 	case StreamDXCluster:
-		comment = s.Comment
+		// Strip any trailing HHMMZ timestamp from the comment — the upstream
+		// cluster sometimes includes it in the comment field, but we already
+		// append our own timestamp at the end of the line.
+		comment = stripTrailingTime(s.Comment)
 	}
 
-	// Standard RBN/DX cluster format:
-	// DX de SPOTTER:  FFFFF.F  CALLSIGN       COMMENT         HHMMZ
+	// Standard DX cluster line format:
+	// DX de SPOTTER:  FFFFF.F  CALLSIGN       COMMENT                    HHMMZ
 	return fmt.Sprintf("DX de %-12s %8.1f  %-13s  %-29s %s",
 		spotter+":", freqKHz, s.Callsign, comment, timeStr)
 }
@@ -146,6 +153,25 @@ type voiceActivityEvent struct {
 	DXCountry       string  `json:"dx_country"`
 	DXCountryCode   string  `json:"dx_country_code"`
 	DXContinent     string  `json:"dx_continent"`
+}
+
+// stripTrailingTime removes a trailing HHMMZ time token from a comment string.
+// e.g. "SR-13 SR-42 1748Z" → "SR-13 SR-42"
+// Some upstream DX clusters include the time in the comment field; we strip it
+// because we already append our own timestamp at the end of the telnet line.
+func stripTrailingTime(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 5 {
+		tail := s[len(s)-5:]
+		if tail[4] == 'Z' &&
+			tail[0] >= '0' && tail[0] <= '2' &&
+			tail[1] >= '0' && tail[1] <= '9' &&
+			tail[2] >= '0' && tail[2] <= '5' &&
+			tail[3] >= '0' && tail[3] <= '9' {
+			s = strings.TrimSpace(s[:len(s)-5])
+		}
+	}
+	return s
 }
 
 // dxSpotEvent is the raw JSON from /api/dxcluster/stream.
