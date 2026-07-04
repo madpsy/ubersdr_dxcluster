@@ -17,8 +17,8 @@ services:
       # DX cluster telnet port (default: 7300)
       # TELNET_PORT: "7300"
       #
-      # URL base path for reverse-proxy addon prefix (default: "")
-      # BASE_PATH: ""
+      # Note: reverse-proxy base path is read automatically from
+      # the X-Forwarded-Prefix header — no configuration needed.
     ports:
       - "7300:7300"
     networks:

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -17,7 +19,6 @@ var staticFiles embed.FS
 type WebServer struct {
 	addr       string
 	hub        *Hub
-	basePath   string
 	rxCallsign string
 	rxName     string
 	rxLocation string
@@ -31,8 +32,7 @@ type ReceiverInfo struct {
 	Location string
 }
 
-func NewWebServer(addr, basePath string, rx ReceiverInfo, hub *Hub) (*WebServer, error) {
-	// Parse index.html as a template (for {{.BasePath}} etc. injection)
+func NewWebServer(addr string, rx ReceiverInfo, hub *Hub) (*WebServer, error) {
 	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read index.html: %w", err)
@@ -44,7 +44,6 @@ func NewWebServer(addr, basePath string, rx ReceiverInfo, hub *Hub) (*WebServer,
 	return &WebServer{
 		addr:       addr,
 		hub:        hub,
-		basePath:   basePath,
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
@@ -52,10 +51,25 @@ func NewWebServer(addr, basePath string, rx ReceiverInfo, hub *Hub) (*WebServer,
 	}, nil
 }
 
+// basePath extracts the proxy prefix from the X-Forwarded-Prefix header.
+// UberSDR's addon proxy sets this when strip_prefix is true.
+// Returns "" when running standalone (direct access).
+func basePath(r *http.Request) string {
+	return strings.TrimRight(r.Header.Get("X-Forwarded-Prefix"), "/")
+}
+
 func (w *WebServer) ListenAndServe() error {
 	mux := http.NewServeMux()
 
-	// Root → serve index.html with BasePath injected
+	// Static files — strip the /static/ prefix and serve from embedded FS sub-tree
+	sub, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		return fmt.Errorf("embed sub: %w", err)
+	}
+	staticHandler := http.FileServer(http.FS(sub))
+	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+
+	// Root → index.html rendered with BasePath from X-Forwarded-Prefix
 	mux.HandleFunc("/", w.handleIndex)
 
 	// SSE relay
@@ -65,26 +79,24 @@ func (w *WebServer) ListenAndServe() error {
 	mux.HandleFunc("/api/spots", w.handleSpots)
 	mux.HandleFunc("/api/status", w.handleStatus)
 
-	// Static assets (js, css)
-	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
-
-	log.Printf("[web] listening on %s (base path: %q)", w.addr, w.basePath)
+	log.Printf("[web] listening on %s", w.addr)
 	return http.ListenAndServe(w.addr, mux)
 }
 
 func (w *WebServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" && r.URL.Path != "" {
+	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 		http.NotFound(rw, r)
 		return
 	}
+	bp := basePath(r)
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = w.tmpl.Execute(rw, struct {
-		BasePath   string
-		Callsign   string
-		Name       string
-		Location   string
+		BasePath string
+		Callsign string
+		Name     string
+		Location string
 	}{
-		BasePath: w.basePath,
+		BasePath: bp,
 		Callsign: w.rxCallsign,
 		Name:     w.rxName,
 		Location: w.rxLocation,
@@ -103,18 +115,21 @@ func (w *WebServer) handleEvents(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Cache-Control", "no-cache")
 	rw.Header().Set("Connection", "keep-alive")
 	rw.Header().Set("X-Accel-Buffering", "no")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Send connected comment + retry hint
-	fmt.Fprintf(rw, ": connected to ubersdr_dxcluster\n")
+	// Send connected event + retry hint
+	fmt.Fprintf(rw, "event: connected\ndata: {}\n\n")
 	fmt.Fprintf(rw, "retry: 3000\n\n")
 	flusher.Flush()
 
 	ch := w.hub.Subscribe()
 	defer w.hub.Unsubscribe(ch)
 
-	// Heartbeat ticker
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	log.Printf("[sse] client connected: %s", r.RemoteAddr)
+	defer log.Printf("[sse] client disconnected: %s", r.RemoteAddr)
 
 	ctx := r.Context()
 	for {
@@ -145,12 +160,14 @@ func (w *WebServer) handleSpots(rw http.ResponseWriter, r *http.Request) {
 	stream := StreamType(r.URL.Query().Get("stream"))
 	spots := w.hub.History(stream)
 	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(rw).Encode(spots)
 }
 
 // handleStatus returns a simple health/status JSON.
 func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(rw).Encode(map[string]interface{}{
 		"status": "ok",
 		"ts":     time.Now().UTC().Format(time.RFC3339),
@@ -161,4 +178,3 @@ func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
-

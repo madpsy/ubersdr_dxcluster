@@ -55,11 +55,10 @@ func fetchDescription(baseURL string) (callsign, name, location string) {
 }
 
 func main() {
-	ubersdrURL   := flag.String("url",       "http://ubersdr:8080", "Base URL of UberSDR instance")
-	webListen    := flag.String("listen",    ":6087",               "Web UI listen address")
-	telnetListen := flag.String("telnet",    ":7300",               "DX cluster telnet listen address")
-	spotterCall  := flag.String("spotter",   "",                    "Callsign shown as spotter (default: fetched from /api/description)")
-	basePath     := flag.String("base-path", "",                    "URL base path (for reverse-proxy addon prefix)")
+	ubersdrURL   := flag.String("url",     "http://ubersdr:8080", "Base URL of UberSDR instance")
+	webListen    := flag.String("listen",  ":6087",               "Web UI listen address")
+	telnetListen := flag.String("telnet",  ":7300",               "DX cluster telnet listen address")
+	spotterCall  := flag.String("spotter", "",                    "Callsign shown as spotter (default: fetched from /api/description)")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -96,7 +95,7 @@ func main() {
 	}()
 
 	// Start web server
-	web, err := NewWebServer(*webListen, *basePath, ReceiverInfo{
+	web, err := NewWebServer(*webListen, ReceiverInfo{
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,

@@ -5,16 +5,18 @@
 #   UBERSDR_URL    UberSDR base HTTP URL (default: http://ubersdr:8080)
 #   WEB_PORT       Port for the web UI server (default: 6087)
 #   TELNET_PORT    Port for the DX cluster telnet server (default: 7300)
-#   SPOTTER_CALL   Callsign shown as spotter for digital/voice spots (default: UBERSDR)
-#   BASE_PATH      URL base path for reverse-proxy addon prefix (default: "")
+#   SPOTTER_CALL   Callsign shown as spotter for digital/voice spots
+#                  (default: fetched from /api/description at startup)
+#
+# Note: The URL base path for reverse-proxy is read automatically from the
+#       X-Forwarded-Prefix request header — no configuration needed.
 
 set -e
 
 args=""
 
-[ -n "$UBERSDR_URL"   ] && args="$args -url $UBERSDR_URL"
-[ -n "$SPOTTER_CALL"  ] && args="$args -spotter $SPOTTER_CALL"
-[ -n "$BASE_PATH"     ] && args="$args -base-path $BASE_PATH"
+[ -n "$UBERSDR_URL"  ] && args="$args -url $UBERSDR_URL"
+[ -n "$SPOTTER_CALL" ] && args="$args -spotter $SPOTTER_CALL"
 
 # WEB_PORT → -listen :<port>
 if [ -n "$WEB_PORT" ]; then
