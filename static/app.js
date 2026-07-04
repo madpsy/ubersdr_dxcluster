@@ -96,6 +96,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
     connect();
   
+    // Load country list for filter select
+    loadCountries();
+  
     // Poll /api/status every 10 s for telnet client count
     pollStatus();
     setInterval(pollStatus, 10_000);
@@ -132,6 +135,26 @@ function connect() {
   es.onerror = () => {
     setConnState('disconnected');
   };
+}
+
+// ── Country list loader ────────────────────────────────────────────────────
+async function loadCountries() {
+  try {
+    const resp = await fetch(BASE + '/api/countries');
+    if (!resp.ok) return;
+    const countries = await resp.json();
+    if (!Array.isArray(countries) || countries.length === 0) return;
+    const sel = document.getElementById('f-country');
+    if (!sel) return;
+    // Keep the "All" option, append country options sorted alphabetically
+    countries.forEach(c => {
+      if (!c.country_code) return;
+      const opt = document.createElement('option');
+      opt.value = c.country_code;
+      opt.textContent = c.name + ' (' + c.country_code + ')';
+      sel.appendChild(opt);
+    });
+  } catch(_) {}
 }
 
 // ── Status polling ─────────────────────────────────────────────────────────
@@ -347,7 +370,7 @@ function rowMatchesFilter(tr) {
   const checkedModes = getCheckedModes();
   const bands        = getSelectedOptions('f-band');
   const conts        = getSelectedOptions('f-cont');
-  const countries    = getTextList('f-country');
+  const countries    = getSelectedOptions('f-country');
   const callPfx      = getTextList('f-call');
 
   const snrMinEl = document.getElementById('f-snr-min');
@@ -436,11 +459,11 @@ function clearAllFilters() {
     const el = document.getElementById(id);
     if (el) Array.from(el.options).forEach(o => o.selected = false);
   });
-  // Reset text inputs
-  ['f-country','f-call'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
+  // Reset country select and call text input
+  const countryEl = document.getElementById('f-country');
+  if (countryEl) Array.from(countryEl.options).forEach(o => o.selected = false);
+  const callEl = document.getElementById('f-call');
+  if (callEl) callEl.value = '';
   // Reset SNR sliders
   const snrMin = document.getElementById('f-snr-min');
   const snrMax = document.getElementById('f-snr-max');

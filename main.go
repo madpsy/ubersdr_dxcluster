@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,50 @@ type descriptionResponse struct {
 		Name     string `json:"name"`
 		Location string `json:"location"`
 	} `json:"receiver"`
+}
+
+// CountryEntry is one entry from /api/cty/countries.
+type CountryEntry struct {
+	Name        string `json:"name"`
+	CountryCode string `json:"country_code"`
+}
+
+// fetchCountries fetches the country list from /api/cty/countries.
+// Returns a sorted slice of CountryEntry. Falls back to empty on error.
+func fetchCountries(baseURL string) []CountryEntry {
+	url := strings.TrimRight(baseURL, "/") + "/api/cty/countries"
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("fetchCountries: %v (country filter will be unavailable)", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Countries []CountryEntry `json:"countries"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("fetchCountries decode: %v", err)
+		return nil
+	}
+
+	// Deduplicate by country_code (CTY has multiple entries per code)
+	seen := make(map[string]bool)
+	var out []CountryEntry
+	for _, c := range result.Data.Countries {
+		if c.CountryCode == "" || seen[c.CountryCode] {
+			continue
+		}
+		seen[c.CountryCode] = true
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	log.Printf("fetchCountries: loaded %d countries", len(out))
+	return out
 }
 
 // fetchDescription calls /api/description on the UberSDR instance and returns
@@ -99,12 +144,15 @@ func main() {
 		}
 	}()
 
+	// Fetch country list for web UI filter
+	countries := fetchCountries(*ubersdrURL)
+
 	// Start web server
 	web, err := NewWebServer(*webListen, *telnetListen, ReceiverInfo{
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,
-	}, telnet, hub)
+	}, countries, telnet, hub)
 	if err != nil {
 		log.Fatalf("web server init: %v", err)
 	}

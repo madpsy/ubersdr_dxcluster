@@ -24,6 +24,7 @@ type WebServer struct {
 	rxName      string
 	rxLocation  string
 	telnetAddr  string
+	countries   []CountryEntry
 	tmpl        *template.Template
 }
 
@@ -34,7 +35,7 @@ type ReceiverInfo struct {
 	Location string
 }
 
-func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, telnet *TelnetServer, hub *Hub) (*WebServer, error) {
+func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub) (*WebServer, error) {
 	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read index.html: %w", err)
@@ -51,6 +52,7 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, telnet *TelnetServer
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
 		telnetAddr: telnetAddr,
+		countries:  countries,
 		tmpl:       tmpl,
 	}, nil
 }
@@ -83,6 +85,7 @@ func (w *WebServer) ListenAndServe() error {
 	mux.HandleFunc("/api/spots", w.handleSpots)
 	mux.HandleFunc("/api/status", w.handleStatus)
 	mux.HandleFunc("/api/help", w.handleHelp)
+	mux.HandleFunc("/api/countries", w.handleCountries)
 
 	log.Printf("[web] listening on %s", w.addr)
 	return http.ListenAndServe(w.addr, mux)
@@ -176,6 +179,13 @@ func (w *WebServer) handleHelp(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	rw.Header().Set("Access-Control-Allow-Origin", "*")
 	fmt.Fprint(rw, helpText)
+}
+
+// handleCountries returns the country list as JSON for the web UI filter.
+func (w *WebServer) handleCountries(rw http.ResponseWriter, r *http.Request) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
+	_ = json.NewEncoder(rw).Encode(w.countries)
 }
 
 // handleStatus returns a simple health/status JSON including telnet client count.

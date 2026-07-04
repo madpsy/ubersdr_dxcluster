@@ -125,19 +125,26 @@
       <!-- Continent multi-select -->
       <div class="filter-group">
         <div class="filter-group-label">Continent</div>
-        <select id="f-cont" multiple size="3" onchange="applyFilters()">
+        <select id="f-cont" multiple size="4" onchange="applyFilters()">
           <option value="">All</option>
-          <option>EU</option><option>NA</option><option>SA</option>
-          <option>AF</option><option>AS</option><option>OC</option><option>AN</option>
+          <option value="EU">Europe (EU)</option>
+          <option value="NA">North America (NA)</option>
+          <option value="SA">South America (SA)</option>
+          <option value="AF">Africa (AF)</option>
+          <option value="AS">Asia (AS)</option>
+          <option value="OC">Oceania (OC)</option>
+          <option value="AN">Antarctica (AN)</option>
         </select>
         <span class="filter-hint">Ctrl+click multi</span>
       </div>
 
-      <!-- Country text input -->
+      <!-- Country multi-select (populated from /api/countries) -->
       <div class="filter-group">
         <div class="filter-group-label">Country</div>
-        <input type="text" id="f-country" placeholder="DE,G,PA…" oninput="applyFilters()" class="filter-input">
-        <span class="filter-hint">ISO codes, comma-sep</span>
+        <select id="f-country" multiple size="4" onchange="applyFilters()">
+          <option value="">All</option>
+        </select>
+        <span class="filter-hint">Ctrl+click multi</span>
       </div>
 
       <!-- Callsign prefix text input -->
