@@ -324,8 +324,10 @@ func parseVoiceActivity(data []byte) (*Spot, error) {
 	if e.Type != "voice_activity" {
 		return nil, nil
 	}
+
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 
+	// Use N0CALL when no DX callsign is known — voice spots are always kept
 	callsign := e.DXCallsign
 	if callsign == "" {
 		callsign = "N0CALL"
@@ -334,7 +336,7 @@ func parseVoiceActivity(data []byte) (*Spot, error) {
 	return &Spot{
 		Stream:       StreamVoiceActivity,
 		Timestamp:    ts,
-		Band:         e.Band,
+		Band:         bandForSpot(float64(e.EstimatedDialFreq)),
 		Callsign:     callsign,
 		FreqHz:       float64(e.EstimatedDialFreq),
 		SNR:          e.SNR,
