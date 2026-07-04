@@ -1,0 +1,186 @@
+/* Self-hosted fonts — fetched from Google Fonts (latin subset) */
+
+/* Twemoji flag emoji — flags-only subset (Regional Indicator pairs U+1F1E6–U+1F1FF).
+   Fixes Chrome on Windows which lacks flag glyphs in Segoe UI Emoji.
+   Only activates for the Regional Indicator unicode block; all other text is unaffected.
+   Font: Twemoji 16.0.1 SVG-COLR1, subset by fontTools. ~500 KB WOFF2.
+
+   The font is declared under multiple common font-family names so it is consulted
+   regardless of which font stack an element uses. The unicode-range restricts it
+   to flag codepoints only — zero effect on any other characters. */
+/* ascent-override / descent-override / line-gap-override normalise the font's
+   vertical metrics to match a typical Latin font (100% / 20% / 0%).
+   Without these, Safari (which has a bug where it applies the emoji font's
+   enormous ascent/descent to line-height:normal even when no flag glyphs are
+   present) inflates every element that uses one of these font-family names to
+   ~280 px tall.  Chrome and Firefox are unaffected but the overrides are
+   harmless there too — they only influence metric calculations, not glyph
+   rendering, and the unicode-range still restricts actual glyph substitution
+   to the Regional Indicator block (U+1F1E6–U+1F1FF). */
+@font-face {
+    font-family: 'Twemoji Flags';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'Segoe UI Emoji';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'Segoe UI';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: 'Courier New';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: monospace;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+
+@font-face {
+    font-family: 'Helvetica Neue';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: Arial;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+@font-face {
+    font-family: Helvetica;
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('twemoji-flags.woff2') format('woff2');
+    unicode-range: U+1F1E6-1F1FF;
+    ascent-override: 100%;
+    descent-override: 20%;
+    line-gap-override: 0%;
+}
+
+/* Ensure Leaflet map elements (which use their own font stack) also get the flag font.
+   Leaflet's default is "Helvetica Neue", Arial, Helvetica, sans-serif — none of which
+   include flag glyphs on Windows Chrome. These rules prepend the flag font globally. */
+.leaflet-container {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
+}
+.leaflet-popup-content {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, Helvetica, 'Twemoji Flags', sans-serif;
+}
+
+/* Nixie One — display/nixie tube style, regular 400 only */
+@font-face {
+    font-family: 'Nixie One';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('nixie-one.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Atkinson Hyperlegible — accessibility-focused body font */
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('atkinson-hyperlegible-400.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('atkinson-hyperlegible-700.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url('atkinson-hyperlegible-400i.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible';
+    font-style: italic;
+    font-weight: 700;
+    font-display: swap;
+    src: url('atkinson-hyperlegible-700i.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
