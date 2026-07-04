@@ -5,28 +5,51 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 )
 
+// callsignRe is the DX Spider is_callsign() regex translated to Go.
+// Matches valid amateur callsigns including portable/mobile suffixes and SSIDs.
+var callsignRe = regexp.MustCompile(`(?i)^` +
+	`(?:\d?[A-Z]{1,2}\d{0,2}/)?` + // optional out-of-area prefix/
+	`(?:\d?[A-Z]{1,2}\d{1,5})` + // main prefix (required)
+	`[A-Z]{1,8}` + // callsign letters (required)
+	`(?:-\d{1,2})?` + // optional -nn SSID
+	`(?:/[0-9A-Z]{1,7})?` + // optional /suffix
+	`(?:/(?:AM?|MM?|P))?` + // optional /A /AM /M /MM /P
+	`$`)
+
+// isValidCallsign returns true if s looks like a valid amateur callsign.
+// Pure digit strings are rejected (matching DX Spider behaviour).
+func isValidCallsign(s string) bool {
+	if regexp.MustCompile(`^\d+$`).MatchString(s) {
+		return false
+	}
+	return callsignRe.MatchString(strings.ToUpper(s))
+}
+
 // TelnetServer listens for DX cluster client connections and streams spots
 // in standard AR-Cluster / RBN format.
 type TelnetServer struct {
-	addr        string
-	hub         *Hub
-	spotterCall string
-	clients     atomic.Int32
-	version     string
+	addr         string
+	hub          *Hub
+	spotterCall  string
+	clients      atomic.Int32
+	version      string
+	requireLogin bool
 }
 
-func NewTelnetServer(addr string, hub *Hub, spotterCall string) *TelnetServer {
+func NewTelnetServer(addr string, hub *Hub, spotterCall string, requireLogin bool) *TelnetServer {
 	return &TelnetServer{
-		addr:        addr,
-		hub:         hub,
-		spotterCall: spotterCall,
-		version:     "ubersdr_dxcluster/1.0",
+		addr:         addr,
+		hub:          hub,
+		spotterCall:  spotterCall,
+		version:      "ubersdr_dxcluster/1.0",
+		requireLogin: requireLogin,
 	}
 }
 
@@ -325,12 +348,30 @@ func (t *TelnetServer) handleConn(conn net.Conn) {
 		log.Printf("[telnet] client disconnected: %s (total: %d)", remote, t.clients.Load())
 	}()
 
-	// Send login banner
-	fmt.Fprintf(conn, "Hello %s de UberSDR DX Cluster\r\n", t.spotterCall)
+	state := newClientState()
+
+	// ── Login prompt ───────────────────────────────────────────────────────
+	if t.requireLogin {
+		fmt.Fprintf(conn, "login: ")
+		loginScanner := bufio.NewScanner(conn)
+		if !loginScanner.Scan() {
+			return // connection closed before login
+		}
+		input := strings.TrimSpace(loginScanner.Text())
+		call := strings.ToUpper(input)
+		if !isValidCallsign(call) {
+			fmt.Fprintf(conn, "Sorry %s is an invalid callsign\r\n", input)
+			log.Printf("[telnet] rejected invalid callsign %q from %s", input, remote)
+			return
+		}
+		state.Name = call
+		log.Printf("[telnet] login: %s from %s", call, remote)
+	}
+
+	// ── Banner ─────────────────────────────────────────────────────────────
+	fmt.Fprintf(conn, "Hello de %s DX Cluster\r\n", t.spotterCall)
 	fmt.Fprintf(conn, "Streaming live spots from UberSDR (Digital / CW / Voice)\r\n")
 	fmt.Fprintf(conn, "Type HELP for a full list of commands, or BYE to disconnect.\r\n\r\n")
-
-	state := newClientState()
 
 	// Subscribe to hub
 	ch := t.hub.Subscribe()

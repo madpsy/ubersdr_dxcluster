@@ -2,11 +2,13 @@
 # entrypoint.sh — translate environment variables into ubersdr_dxcluster flags
 #
 # Environment variables:
-#   UBERSDR_URL    UberSDR base HTTP URL (default: http://ubersdr:8080)
-#   WEB_PORT       Port for the web UI server (default: 6087)
-#   TELNET_PORT    Port for the DX cluster telnet server (default: 7300)
-#   SPOTTER_CALL   Callsign shown as spotter for digital/voice spots
-#                  (default: fetched from /api/description at startup)
+#   UBERSDR_URL     UberSDR base HTTP URL (default: http://ubersdr:8080)
+#   WEB_PORT        Port for the web UI server (default: 6087)
+#   TELNET_PORT     Port for the DX cluster telnet server (default: 7300)
+#   SPOTTER_CALL    Callsign shown as spotter for digital/voice spots
+#                   (default: fetched from /api/description at startup)
+#   REQUIRE_LOGIN   Require a valid callsign on telnet connect (default: true)
+#                   Set to "false" or "0" to allow anonymous connections
 #
 # Note: The URL base path for reverse-proxy is read automatically from the
 #       X-Forwarded-Prefix request header — no configuration needed.
@@ -17,6 +19,11 @@ args=""
 
 [ -n "$UBERSDR_URL"  ] && args="$args -url $UBERSDR_URL"
 [ -n "$SPOTTER_CALL" ] && args="$args -spotter $SPOTTER_CALL"
+
+# REQUIRE_LOGIN: pass -require-login=false if explicitly disabled
+if [ "$REQUIRE_LOGIN" = "false" ] || [ "$REQUIRE_LOGIN" = "0" ]; then
+    args="$args -require-login=false"
+fi
 
 # WEB_PORT → -listen :<port>
 if [ -n "$WEB_PORT" ]; then

@@ -55,10 +55,11 @@ func fetchDescription(baseURL string) (callsign, name, location string) {
 }
 
 func main() {
-	ubersdrURL   := flag.String("url",     "http://ubersdr:8080", "Base URL of UberSDR instance")
-	webListen    := flag.String("listen",  ":6087",               "Web UI listen address")
-	telnetListen := flag.String("telnet",  ":7300",               "DX cluster telnet listen address")
-	spotterCall  := flag.String("spotter", "",                    "Callsign shown as spotter (default: fetched from /api/description)")
+	ubersdrURL    := flag.String("url",           "http://ubersdr:8080", "Base URL of UberSDR instance")
+	webListen     := flag.String("listen",        ":6087",               "Web UI listen address")
+	telnetListen  := flag.String("telnet",        ":7300",               "DX cluster telnet listen address")
+	spotterCall   := flag.String("spotter",       "",                    "Callsign shown as spotter (default: fetched from /api/description)")
+	requireLogin  := flag.Bool("require-login",   true,                  "Require a valid callsign login on telnet connect (default: true)")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -87,7 +88,7 @@ func main() {
 	StartConsumers(ctx, *ubersdrURL, hub)
 
 	// Start telnet DX cluster server
-	telnet := NewTelnetServer(*telnetListen, hub, callsign)
+	telnet := NewTelnetServer(*telnetListen, hub, callsign, *requireLogin)
 	go func() {
 		if err := telnet.ListenAndServe(); err != nil {
 			log.Fatalf("telnet server: %v", err)

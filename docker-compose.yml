@@ -17,6 +17,10 @@ services:
       # DX cluster telnet port (default: 7300)
       # TELNET_PORT: "7300"
       #
+      # Require a valid callsign login on telnet connect (default: true)
+      # Set to "false" to allow anonymous connections
+      # REQUIRE_LOGIN: "true"
+      #
       # Note: reverse-proxy base path is read automatically from
       # the X-Forwarded-Prefix header — no configuration needed.
     ports:
