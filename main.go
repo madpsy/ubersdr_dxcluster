@@ -88,7 +88,11 @@ func main() {
 	StartConsumers(ctx, *ubersdrURL, hub)
 
 	// Start telnet DX cluster server
-	telnet := NewTelnetServer(*telnetListen, hub, callsign, *requireLogin)
+	telnet := NewTelnetServer(*telnetListen, hub, callsign, ReceiverInfo{
+		Callsign: callsign,
+		Name:     rxName,
+		Location: rxLocation,
+	}, *requireLogin)
 	go func() {
 		if err := telnet.ListenAndServe(); err != nil {
 			log.Fatalf("telnet server: %v", err)

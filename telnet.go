@@ -38,16 +38,20 @@ type TelnetServer struct {
 	addr         string
 	hub          *Hub
 	spotterCall  string
+	rxName       string
+	rxLocation   string
 	clients      atomic.Int32
 	version      string
 	requireLogin bool
 }
 
-func NewTelnetServer(addr string, hub *Hub, spotterCall string, requireLogin bool) *TelnetServer {
+func NewTelnetServer(addr string, hub *Hub, spotterCall string, rx ReceiverInfo, requireLogin bool) *TelnetServer {
 	return &TelnetServer{
 		addr:         addr,
 		hub:          hub,
 		spotterCall:  spotterCall,
+		rxName:       rx.Name,
+		rxLocation:   rx.Location,
 		version:      "ubersdr_dxcluster/1.0",
 		requireLogin: requireLogin,
 	}
@@ -350,9 +354,19 @@ func (t *TelnetServer) handleConn(conn net.Conn) {
 
 	state := newClientState()
 
-	// ── Login prompt ───────────────────────────────────────────────────────
+	// ── Welcome + login prompt ─────────────────────────────────────────────
+	clientNum := int(t.clients.Load())
+	fmt.Fprintf(conn, "\r\nWelcome to %s UberSDR DX Cluster. You are client #%d.\r\n", t.spotterCall, clientNum)
+	if t.rxName != "" {
+		fmt.Fprintf(conn, "Receiver  : %s\r\n", t.rxName)
+	}
+	if t.rxLocation != "" {
+		fmt.Fprintf(conn, "Location  : %s\r\n", t.rxLocation)
+	}
+	fmt.Fprintf(conn, "Streaming live Digital, CW and Voice spots from UberSDR.\r\n\r\n")
+
 	if t.requireLogin {
-		fmt.Fprintf(conn, "login: ")
+		fmt.Fprintf(conn, "Please enter your callsign: ")
 		loginScanner := bufio.NewScanner(conn)
 		if !loginScanner.Scan() {
 			return // connection closed before login
