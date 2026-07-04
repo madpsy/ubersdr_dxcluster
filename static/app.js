@@ -1,7 +1,7 @@
 'use strict';
 
 const BASE          = window.BASE_PATH || '';
-const MAX_ROWS      = 200;   // max rows per decoder / CW table
+const MAX_ROWS      = 200;
 const VOICE_EXPIRE  = 10 * 60 * 1000; // 10 minutes in ms
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -41,13 +41,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (infoEl) infoEl.style.display = 'flex';
     if (callEl) callEl.textContent = rxCall;
     if (locEl)  locEl.textContent  = rxLoc || rxName;
-    // Also update page title
-    if (rxCall) document.title = '📡 ' + rxCall + ' DX Cluster';
+    if (rxCall) document.title = '\uD83D\uDCE1 ' + rxCall + ' DX Cluster';
   }
 
   connect();
 
-  // Load history for decoder and CW panels
+  // Load history for all three panels
   loadHistory('decoder');
   loadHistory('cwskimmer');
   loadHistory('voice');
@@ -73,18 +72,14 @@ function connect() {
     setConnState('connected');
   });
 
-  // The SSE comment "connected" fires as an unnamed event in some browsers;
-  // treat any successful open as connected.
   es.onopen = () => setConnState('connected');
 
   es.onerror = () => {
     setConnState('disconnected');
-    // EventSource auto-reconnects; we just update the UI
   };
 }
 
 function setConnState(state) {
-  // state: 'connected' | 'disconnected' | 'waiting'
   [connDecoder, connCW, connVoice].forEach(el => {
     if (!el) return;
     el.className = 'conn-pill ' + state;
@@ -99,7 +94,6 @@ async function loadHistory(stream) {
     const spots = await resp.json();
     if (!Array.isArray(spots)) return;
     // History is newest-first; reverse so oldest is processed first
-    // (prepend logic will put newest at top)
     spots.slice().reverse().forEach(s => onSpot(s, false));
   } catch(_) {}
 }
@@ -115,13 +109,12 @@ function onSpot(spot, live) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fmtUTC(isoStr) {
-  if (!isoStr) return '—';
-  const d = new Date(isoStr);
-  return d.toISOString().slice(11, 19);
+  if (!isoStr) return '\u2014';
+  return new Date(isoStr).toISOString().slice(11, 19);
 }
 
 function fmtFreq(hz) {
-  if (!hz) return '—';
+  if (!hz) return '\u2014';
   return (hz / 1000).toFixed(1) + ' kHz';
 }
 
@@ -150,6 +143,29 @@ function trimTable(tbody, max) {
   }
 }
 
+// Build a unified table row: UTC | Callsign | Freq | Band | Mode | SNR | Country | Info
+function buildRow(fields) {
+  // fields: { ts, callsign, freq_hz, band, mode, snr, country, country_code, info }
+  const snr     = fields.snr;
+  const snrStr  = typeof snr === 'number'
+    ? (snr > 0 ? '+' : '') + snr.toFixed(snr % 1 === 0 ? 0 : 1) + ' dB'
+    : (snr || '\u2014');
+  const flag    = fields.country_code ? countryFlag(fields.country_code) + ' ' : '';
+  const country = fields.country ? flag + esc(fields.country) : '\u2014';
+
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td class="ts-col">'      + fmtUTC(fields.ts)              + '</td>' +
+    '<td class="call-col">'    + (fields.callsign || '\u2014')   + '</td>' +
+    '<td class="freq-col">'    + fmtFreq(fields.freq_hz)         + '</td>' +
+    '<td class="band-col">'    + esc(fields.band || '\u2014')    + '</td>' +
+    '<td class="mode-col">'    + esc(fields.mode || '\u2014')    + '</td>' +
+    '<td class="' + snrClass(snr) + '">' + snrStr                + '</td>' +
+    '<td class="country-col">' + country                         + '</td>' +
+    '<td class="info-col">'    + (fields.info || '\u2014')       + '</td>';
+  return tr;
+}
+
 // ── Digital Decoder ────────────────────────────────────────────────────────
 function onDecoder(spot, live) {
   clearPlaceholder(tbodyDecoder);
@@ -157,18 +173,23 @@ function onDecoder(spot, live) {
   hdrDecoder.textContent   = countDecoder;
   badgeDecoder.textContent = countDecoder + ' spots';
 
-  const tr = document.createElement('tr');
-  if (live) tr.className = 'new-row';
+  // Info: locator if present, else distance
+  const info = spot.locator
+    ? '<span class="locator-col">' + esc(spot.locator) + '</span>'
+    : (fmtDist(spot.distance_km) || '\u2014');
 
-  tr.innerHTML = `
-    <td class="ts-col">${fmtUTC(spot.timestamp)}</td>
-    <td class="call-col">${esc(spot.callsign)}</td>
-    <td class="freq-col">${fmtFreq(spot.freq_hz)}</td>
-    <td class="mode-col">${esc(spot.mode || '—')}</td>
-    <td class="band-col">${esc(spot.band || '—')}</td>
-    <td class="${snrClass(spot.snr)}">${spot.snr > 0 ? '+' : ''}${spot.snr} dB</td>
-    <td class="country-col">${countryCell(spot)}</td>
-    <td class="dist-col">${fmtDist(spot.distance_km)}</td>`;
+  const tr = buildRow({
+    ts:           spot.timestamp,
+    callsign:     esc(spot.callsign),
+    freq_hz:      spot.freq_hz,
+    band:         spot.band,
+    mode:         spot.mode,
+    snr:          spot.snr,
+    country:      spot.country,
+    country_code: spot.country_code,
+    info:         info,
+  });
+  if (live) tr.className = 'new-row';
 
   tbodyDecoder.insertBefore(tr, tbodyDecoder.firstChild);
   trimTable(tbodyDecoder, MAX_ROWS);
@@ -181,18 +202,23 @@ function onCW(spot, live) {
   hdrCW.textContent   = countCW;
   badgeCW.textContent = countCW + ' spots';
 
-  const tr = document.createElement('tr');
-  if (live) tr.className = 'new-row-cw';
+  // Info: WPM + spotter callsign
+  const wpm     = spot.wpm     ? spot.wpm + ' wpm'          : '';
+  const spotter = spot.spotter ? 'de ' + esc(spot.spotter)  : '';
+  const info    = [wpm, spotter].filter(Boolean).join(' ') || '\u2014';
 
-  tr.innerHTML = `
-    <td class="ts-col">${fmtUTC(spot.timestamp)}</td>
-    <td class="call-col">${esc(spot.callsign)}</td>
-    <td class="freq-col">${fmtFreq(spot.freq_hz)}</td>
-    <td class="band-col">${esc(spot.band || '—')}</td>
-    <td class="${snrClass(spot.snr)}">${spot.snr} dB</td>
-    <td class="wpm-col">${spot.wpm || '—'}</td>
-    <td class="country-col">${countryCell(spot)}</td>
-    <td class="dist-col">${fmtDist(spot.distance_km)}</td>`;
+  const tr = buildRow({
+    ts:           spot.timestamp,
+    callsign:     esc(spot.callsign),
+    freq_hz:      spot.freq_hz,
+    band:         spot.band,
+    mode:         'CW',
+    snr:          spot.snr,
+    country:      spot.country,
+    country_code: spot.country_code,
+    info:         info,
+  });
+  if (live) tr.className = 'new-row-cw';
 
   tbodyCW.insertBefore(tr, tbodyCW.firstChild);
   trimTable(tbodyCW, MAX_ROWS);
@@ -203,15 +229,12 @@ function onVoice(spot, live) {
   const key = (spot.band || '') + '|' + (spot.freq_hz || spot.est_dial_freq || 0);
 
   if (voiceMap.has(key)) {
-    // Upsert: update existing row
     const entry = voiceMap.get(key);
     entry.spot = spot;
     updateVoiceRow(entry.tr, spot, live);
   } else {
-    // New entry: prepend row
     clearPlaceholder(tbodyVoice);
     const tr = document.createElement('tr');
-    if (live) tr.className = 'new-row-voice';
     tbodyVoice.insertBefore(tr, tbodyVoice.firstChild);
     voiceMap.set(key, { spot, tr });
     updateVoiceRow(tr, spot, live);
@@ -221,29 +244,41 @@ function onVoice(spot, live) {
 }
 
 function updateVoiceRow(tr, spot, live) {
-  if (live) {
-    tr.className = 'new-row-voice';
-  }
+  if (live) tr.className = 'new-row-voice';
+
+  // Callsign: dim N0CALL
   const callsign = spot.callsign === 'N0CALL'
     ? '<span style="color:var(--dim)">N0CALL</span>'
-    : `<strong>${esc(spot.callsign)}</strong>`;
+    : '<strong>' + esc(spot.callsign) + '</strong>';
 
-  tr.innerHTML = `
-    <td class="ts-col">${fmtUTC(spot.timestamp)}</td>
-    <td class="call-col">${callsign}</td>
-    <td class="freq-col">${fmtFreq(spot.freq_hz)}</td>
-    <td class="mode-col">${esc(spot.voice_mode || spot.mode || '—')}</td>
-    <td class="band-col">${esc(spot.band || '—')}</td>
-    <td class="${snrClass(spot.snr)}">${spot.snr.toFixed ? spot.snr.toFixed(1) : spot.snr} dB</td>
-    <td class="conf-col">${spot.confidence ? (spot.confidence * 100).toFixed(0) + '%' : '—'}</td>
-    <td class="country-col">${spot.country ? esc(spot.country) : '—'}</td>`;
+  // Info: confidence% + bandwidth
+  const conf = spot.confidence ? (spot.confidence * 100).toFixed(0) + '%' : '';
+  const bw   = spot.bandwidth  ? spot.bandwidth + ' Hz'               : '';
+  const info = [conf, bw].filter(Boolean).join(' \u00B7 ') || '\u2014';
+
+  const snr    = spot.snr;
+  const snrStr = typeof snr === 'number'
+    ? snr.toFixed(1) + ' dB'
+    : (snr || '\u2014');
+  const flag    = spot.country_code ? countryFlag(spot.country_code) + ' ' : '';
+  const country = spot.country ? flag + esc(spot.country) : '\u2014';
+
+  tr.innerHTML =
+    '<td class="ts-col">'      + fmtUTC(spot.timestamp)                    + '</td>' +
+    '<td class="call-col">'    + callsign                                   + '</td>' +
+    '<td class="freq-col">'    + fmtFreq(spot.freq_hz)                      + '</td>' +
+    '<td class="band-col">'    + esc(spot.band || '\u2014')                 + '</td>' +
+    '<td class="mode-col">'    + esc(spot.voice_mode || spot.mode || '\u2014') + '</td>' +
+    '<td class="' + snrClass(snr) + '">' + snrStr                           + '</td>' +
+    '<td class="country-col">' + country                                    + '</td>' +
+    '<td class="info-col">'    + info                                       + '</td>';
 }
 
 function pruneVoice() {
   const now = Date.now();
   let changed = false;
   for (const [key, entry] of voiceMap) {
-    const ts = new Date(entry.spot.timestamp).getTime();
+    const ts  = new Date(entry.spot.timestamp).getTime();
     const age = now - ts;
     if (age > VOICE_EXPIRE) {
       entry.tr.remove();
@@ -265,15 +300,8 @@ function updateVoiceBadge() {
   }
 }
 
-// ── Country cell ───────────────────────────────────────────────────────────
-function countryCell(spot) {
-  if (!spot.country) return '—';
-  const flag = spot.country_code ? countryFlag(spot.country_code) : '';
-  return flag + ' ' + esc(spot.country);
-}
-
+// ── Country flag emoji ─────────────────────────────────────────────────────
 function countryFlag(code) {
-  // Convert ISO 3166-1 alpha-2 to regional indicator emoji
   if (!code || code.length !== 2) return '';
   const offset = 0x1F1E6 - 65;
   return String.fromCodePoint(code.toUpperCase().charCodeAt(0) + offset) +

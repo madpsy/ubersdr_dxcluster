@@ -210,19 +210,18 @@ td {
   white-space: nowrap;
 }
 
-td.ts-col   { color: var(--muted); font-size: 10px; }
-td.call-col { color: var(--text);  font-weight: 700; }
-td.freq-col { color: var(--blue);  }
-td.mode-col { color: var(--purple); }
-td.band-col { color: var(--dim);   }
-td.snr-hi   { color: var(--red);   }
-td.snr-med  { color: var(--orange);}
-td.snr-lo   { color: var(--green); }
-td.snr-neg  { color: var(--muted); }
-td.country-col { color: var(--muted); font-size: 10px; }
-td.dist-col    { color: var(--dim);   font-size: 10px; }
-td.conf-col    { color: var(--cyan);  }
-td.wpm-col     { color: var(--gold);  }
+td.ts-col      { color: var(--muted);  font-size: 10px; }
+td.call-col    { color: var(--text);   font-weight: 700; }
+td.freq-col    { color: var(--blue);   }
+td.mode-col    { color: var(--purple); }
+td.band-col    { color: var(--dim);    }
+td.snr-hi      { color: var(--red);    }
+td.snr-med     { color: var(--orange); }
+td.snr-lo      { color: var(--green);  }
+td.snr-neg     { color: var(--muted);  }
+td.country-col { color: var(--muted);  font-size: 10px; }
+td.info-col    { color: var(--dim);    font-size: 10px; }
+.locator-col   { color: var(--cyan);   font-family: var(--mono); }
 
 .no-data {
   text-align: center; color: var(--muted);
