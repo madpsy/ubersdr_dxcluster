@@ -176,7 +176,9 @@ header {
 .card-hdr.collapsible { cursor: pointer; user-select: none; }
 .card-hdr.collapsible:hover { background: rgba(255,255,255,0.03); }
 .card-hdr .icon { font-size: 14px; }
-.collapse-icon { margin-left: auto; font-size: 10px; color: var(--dim); }
+/* hdr-spacer pushes badge+collapse to the right */
+.card-hdr .hdr-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.collapse-icon { font-size: 10px; color: var(--dim); }
 
 /* Collapsible card body */
 .card-body { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
@@ -194,7 +196,6 @@ header {
 .stream-all     { background: rgba(167,139,250,0.12); color: var(--purple); border: 1px solid rgba(167,139,250,0.25); }
 
 .badge {
-  margin-left: auto;
   background: var(--surface2);
   border: 1px solid var(--border2);
   border-radius: 10px;

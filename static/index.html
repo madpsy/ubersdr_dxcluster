@@ -65,6 +65,10 @@
     <span class="val" id="hdr-telnet-clients">0</span>
   </div>
   <div class="stat-pill"><span class="lbl">Total</span><span class="val" id="hdr-total">0</span></div>
+  <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
+  <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
+  <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
+  <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
   <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 </header>
 
@@ -93,12 +97,13 @@
       <!-- Band multi-select -->
       <div class="filter-group">
         <div class="filter-group-label">Band</div>
-        <select id="f-band" multiple size="3" onchange="applyFilters()">
+        <select id="f-band" multiple size="4" onchange="applyFilters()">
           <option value="">All</option>
+          <option>2200m</option><option>630m</option><option>600m</option>
           <option>160m</option><option>80m</option><option>60m</option>
           <option>40m</option><option>30m</option><option>20m</option>
           <option>17m</option><option>15m</option><option>12m</option>
-          <option>10m</option><option>6m</option>
+          <option>11m</option><option>10m</option><option>6m</option>
         </select>
         <span class="filter-hint">Ctrl+click multi</span>
       </div>
@@ -163,8 +168,7 @@
     <div class="card-hdr collapsible" onclick="toggleCard('all')">
       <span class="icon">📋</span> All Spots
       <span class="stream-pill stream-all">Combined</span>
-      <span class="badge" id="badge-all">0 spots</span>
-      <span class="collapse-icon" id="collapse-all">▲</span>
+      <span class="hdr-right"><span class="badge" id="badge-all">0 spots</span><span class="collapse-icon" id="collapse-all">▲</span></span>
     </div>
     <div class="card-body" id="body-all">
       <div class="table-wrap">
@@ -192,8 +196,7 @@
     <div class="card-hdr collapsible" onclick="toggleCard('decoder')">
       <span class="icon">📻</span> Digital Decodes
       <span class="stream-pill stream-decoder">FT8 · FT4 · WSPR · JS8</span>
-      <span class="badge" id="badge-decoder">0 spots</span>
-      <span class="collapse-icon" id="collapse-decoder">▼</span>
+      <span class="hdr-right"><span class="badge" id="badge-decoder">0 spots</span><span class="collapse-icon" id="collapse-decoder">▼</span></span>
     </div>
     <div class="card-body collapsed" id="body-decoder">
       <div class="table-wrap">
@@ -223,8 +226,7 @@
     <div class="card-hdr collapsible" onclick="toggleCard('cw')">
       <span class="icon">〰</span> CW Spots
       <span class="stream-pill stream-cw">CW Skimmer</span>
-      <span class="badge" id="badge-cw">0 spots</span>
-      <span class="collapse-icon" id="collapse-cw">▼</span>
+      <span class="hdr-right"><span class="badge" id="badge-cw">0 spots</span><span class="collapse-icon" id="collapse-cw">▼</span></span>
     </div>
     <div class="card-body collapsed" id="body-cw">
       <div class="table-wrap">
@@ -254,8 +256,7 @@
     <div class="card-hdr collapsible" onclick="toggleCard('voice')">
       <span class="icon">🎙</span> Voice Activity
       <span class="stream-pill stream-voice">SSB · USB · LSB</span>
-      <span class="badge" id="badge-voice">0 active</span>
-      <span class="collapse-icon" id="collapse-voice">▼</span>
+      <span class="hdr-right"><span class="badge" id="badge-voice">0 active</span><span class="collapse-icon" id="collapse-voice">▼</span></span>
     </div>
     <div class="card-body collapsed" id="body-voice">
       <div class="table-wrap">
@@ -288,8 +289,7 @@
     <div class="card-hdr collapsible" onclick="toggleCard('dx')">
       <span class="icon">🌍</span> DX Cluster Spots
       <span class="stream-pill stream-dx">DX Cluster</span>
-      <span class="badge" id="badge-dx">0 spots</span>
-      <span class="collapse-icon" id="collapse-dx">▼</span>
+      <span class="hdr-right"><span class="badge" id="badge-dx">0 spots</span><span class="collapse-icon" id="collapse-dx">▼</span></span>
     </div>
     <div class="card-body collapsed" id="body-dx">
       <div class="table-wrap">

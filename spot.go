@@ -198,14 +198,14 @@ func parseDXSpot(data []byte) (*Spot, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return nil, err
 	}
-	if e.Type != "dx_spot" {
+	if e.Type != "dx_spot" || e.DXCall == "" {
 		return nil, nil
 	}
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 	return &Spot{
 		Stream:      StreamDXCluster,
 		Timestamp:   ts,
-		Band:        e.Band,
+		Band:        bandForSpot(e.Frequency),
 		Callsign:    e.DXCall,
 		FreqHz:      e.Frequency,
 		Spotter:     e.Spotter,
@@ -217,13 +217,46 @@ func parseDXSpot(data []byte) (*Spot, error) {
 }
 
 // parseDecoder converts a raw decoder JSON data line into a Spot.
-// normaliseBand strips the mode suffix from decoder band names.
-// e.g. "20m_FT8" → "20m", "40m_WSPR" → "40m", "40m" → "40m"
-func normaliseBand(band string) string {
-	if idx := strings.IndexByte(band, '_'); idx >= 0 {
-		return band[:idx]
+// bandRanges maps standard amateur band names to their frequency ranges in Hz.
+// Ranges follow UK RSGB allocations, extended slightly to cover common usage.
+// Order matters: checked top-to-bottom, first match wins.
+var bandRanges = []struct {
+	Name string
+	Min  float64
+	Max  float64
+}{
+	{"2200m", 135700, 137800},
+	{"630m", 472000, 479000},
+	{"600m", 500000, 510000},
+	{"160m", 1810000, 2000000},
+	{"80m", 3500000, 4000000},
+	{"60m", 5250000, 5450000},
+	{"40m", 7000000, 7300000},
+	{"30m", 10100000, 10150000},
+	{"20m", 14000000, 14350000},
+	{"17m", 18068000, 18168000},
+	{"15m", 21000000, 21450000},
+	{"12m", 24890000, 24990000},
+	{"11m", 26965000, 27405000},  // CB band
+	{"10m", 28000000, 29700000},
+	{"6m", 50000000, 54000000},
+}
+
+// freqToBand returns the standard amateur band name for a frequency in Hz,
+// or an empty string if the frequency doesn't fall in any known band.
+func freqToBand(hz float64) string {
+	for _, b := range bandRanges {
+		if hz >= b.Min && hz <= b.Max {
+			return b.Name
+		}
 	}
-	return band
+	return ""
+}
+
+// bandForSpot always derives the canonical band name from frequency using the
+// lookup table. The upstream band string is ignored — band names can be arbitrary.
+func bandForSpot(freqHz float64) string {
+	return freqToBand(freqHz)
 }
 
 func parseDecoder(data []byte) (*Spot, error) {
@@ -231,14 +264,14 @@ func parseDecoder(data []byte) (*Spot, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return nil, err
 	}
-	if e.Type != "decode" {
+	if e.Type != "decode" || e.Callsign == "" {
 		return nil, nil
 	}
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 	return &Spot{
 		Stream:      StreamDecoder,
 		Timestamp:   ts,
-		Band:        normaliseBand(e.Band),
+		Band:        bandForSpot(float64(e.Frequency)),
 		Callsign:    e.Callsign,
 		FreqHz:      float64(e.Frequency),
 		SNR:         float64(e.SNR),
@@ -259,14 +292,14 @@ func parseCWSpot(data []byte) (*Spot, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return nil, err
 	}
-	if e.Type != "cw_spot" {
+	if e.Type != "cw_spot" || e.Callsign == "" {
 		return nil, nil
 	}
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 	return &Spot{
 		Stream:      StreamCWSkimmer,
 		Timestamp:   ts,
-		Band:        e.Band,
+		Band:        bandForSpot(e.Frequency),
 		Callsign:    e.Callsign,
 		FreqHz:      e.Frequency,
 		SNR:         float64(e.SNR),

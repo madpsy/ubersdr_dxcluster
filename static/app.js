@@ -453,8 +453,8 @@ function clearAllFilters() {
 function onDecoder(spot, live) {
   clearPlaceholder(tbodyDecoder);
   countDecoder++;
-  hdrDecoder.textContent   = countDecoder;
-  badgeDecoder.textContent = countDecoder + ' spots';
+  if (hdrDecoder)   hdrDecoder.textContent   = countDecoder;
+  if (badgeDecoder) badgeDecoder.textContent = countDecoder + ' spots';
 
   // Info: locator if present, else distance
   const info = spot.locator
@@ -482,8 +482,8 @@ function onDecoder(spot, live) {
 function onCW(spot, live) {
   clearPlaceholder(tbodyCW);
   countCW++;
-  hdrCW.textContent   = countCW;
-  badgeCW.textContent = countCW + ' spots';
+  if (hdrCW)   hdrCW.textContent   = countCW;
+  if (badgeCW) badgeCW.textContent = countCW + ' spots';
 
   // Info: WPM + spotter callsign
   const wpm     = spot.wpm     ? spot.wpm + ' wpm'          : '';
@@ -511,8 +511,8 @@ function onCW(spot, live) {
 function onDXSpot(spot, live) {
   clearPlaceholder(tbodyDX);
   countDX++;
-  hdrDX.textContent   = countDX;
-  badgeDX.textContent = countDX + ' spots';
+  if (hdrDX)   hdrDX.textContent   = countDX;
+  if (badgeDX) badgeDX.textContent = countDX + ' spots';
 
   // Info: comment from spotter
   const info = spot.comment ? esc(spot.comment) : '\u2014';
@@ -611,8 +611,8 @@ function pruneVoice() {
 
 function updateVoiceBadge() {
   const n = voiceMap.size;
-  hdrVoice.textContent   = n;
-  badgeVoice.textContent = n + ' active';
+  if (hdrVoice)   hdrVoice.textContent   = n;
+  if (badgeVoice) badgeVoice.textContent = n + ' active';
   if (n === 0) {
     tbodyVoice.innerHTML = '<tr><td colspan="8" class="no-data">No active voice signals</td></tr>';
   }

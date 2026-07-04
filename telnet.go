@@ -247,7 +247,8 @@ FILTERING  (filters are AND-combined; multiple values within a field are OR-comb
   set/filter band <bands>       Filter by band (comma-separated)
                                   e.g. set/filter band 20m
                                        set/filter band 40m,20m,15m
-                                  Bands: 160m 80m 60m 40m 30m 20m 17m 15m 12m 10m 6m
+                                  Bands: 2200m 630m 600m 160m 80m 60m 40m 30m 20m 17m 15m 12m 11m 10m 6m
+                                  Band names are normalised from frequency if non-standard
 
   set/filter mode <modes>       Filter by mode (comma-separated)
                                   Digital: FT8 FT4 WSPR JS8 FT2
