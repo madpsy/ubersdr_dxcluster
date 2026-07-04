@@ -18,6 +18,17 @@
 
 <div id="tooltip"></div>
 
+<!-- Help modal -->
+<div id="help-overlay" onclick="if(event.target===this)closeHelpModal()">
+  <div id="help-modal">
+    <div id="help-modal-hdr">
+      <span>📡</span> Telnet Command Reference
+      <button id="help-close" onclick="closeHelpModal()">×</button>
+    </div>
+    <div id="help-body">Loading…</div>
+  </div>
+</div>
+
 <header>
   <div class="logo">
     <span class="logo-icon">📡</span>
@@ -46,7 +57,6 @@
   </div>
 
   <div class="hdr-spacer"></div>
-  <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 
   <div class="stat-pill" id="telnet-pill" style="display:none">
     <span class="lbl">Telnet</span>
@@ -54,137 +64,253 @@
     <span class="lbl" style="margin-left:6px">Clients</span>
     <span class="val" id="hdr-telnet-clients">0</span>
   </div>
-  <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
-  <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
-  <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
-  <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
+  <div class="stat-pill"><span class="lbl">Total</span><span class="val" id="hdr-total">0</span></div>
+  <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 </header>
-
-<!-- Help modal -->
-<div id="help-overlay" onclick="if(event.target===this)closeHelpModal()">
-  <div id="help-modal">
-    <div id="help-modal-hdr">
-      <span>📡</span> Telnet Command Reference
-      <button id="help-close" onclick="closeHelpModal()">×</button>
-    </div>
-    <div id="help-body">Loading…</div>
-  </div>
-</div>
 
 <div class="page">
 
-  <!-- Digital Decodes panel -->
-  <div class="card" id="card-decoder">
+  <!-- Filter bar -->
+  <div class="card card-full" id="filter-card">
     <div class="card-hdr">
+      <span class="icon">🔍</span> Filters
+      <span class="filter-note">Applied to combined panel only</span>
+      <button class="filter-clear-btn" onclick="clearAllFilters()">Clear All</button>
+    </div>
+    <div class="filter-body">
+
+      <!-- Stream type toggles -->
+      <div class="filter-group">
+        <div class="filter-group-label">Show</div>
+        <div class="filter-checks">
+          <label class="fcheck"><input type="checkbox" id="f-type-digital" checked onchange="applyFilters()"><span class="fcheck-badge type-digital">Digital</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-type-cw"      checked onchange="applyFilters()"><span class="fcheck-badge type-cw">CW</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-type-voice"   checked onchange="applyFilters()"><span class="fcheck-badge type-voice">Voice</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-type-dx"      checked onchange="applyFilters()"><span class="fcheck-badge type-dx">DX</span></label>
+        </div>
+      </div>
+
+      <!-- Band multi-select -->
+      <div class="filter-group">
+        <div class="filter-group-label">Band</div>
+        <select id="f-band" multiple size="3" onchange="applyFilters()">
+          <option value="">All</option>
+          <option>160m</option><option>80m</option><option>60m</option>
+          <option>40m</option><option>30m</option><option>20m</option>
+          <option>17m</option><option>15m</option><option>12m</option>
+          <option>10m</option><option>6m</option>
+        </select>
+        <span class="filter-hint">Ctrl+click multi</span>
+      </div>
+
+      <!-- Mode checkboxes -->
+      <div class="filter-group">
+        <div class="filter-group-label">Mode</div>
+        <div class="filter-checks">
+          <label class="fcheck"><input type="checkbox" id="f-mode-ft8"  checked onchange="applyFilters()"><span>FT8</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-ft4"  checked onchange="applyFilters()"><span>FT4</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-wspr" checked onchange="applyFilters()"><span>WSPR</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-js8"  checked onchange="applyFilters()"><span>JS8</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-cw"   checked onchange="applyFilters()"><span>CW</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-usb"  checked onchange="applyFilters()"><span>USB</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-lsb"  checked onchange="applyFilters()"><span>LSB</span></label>
+        </div>
+      </div>
+
+      <!-- Continent multi-select -->
+      <div class="filter-group">
+        <div class="filter-group-label">Continent</div>
+        <select id="f-cont" multiple size="3" onchange="applyFilters()">
+          <option value="">All</option>
+          <option>EU</option><option>NA</option><option>SA</option>
+          <option>AF</option><option>AS</option><option>OC</option><option>AN</option>
+        </select>
+        <span class="filter-hint">Ctrl+click multi</span>
+      </div>
+
+      <!-- Country text input -->
+      <div class="filter-group">
+        <div class="filter-group-label">Country</div>
+        <input type="text" id="f-country" placeholder="DE,G,PA…" oninput="applyFilters()" class="filter-input">
+        <span class="filter-hint">ISO codes, comma-sep</span>
+      </div>
+
+      <!-- Callsign prefix text input -->
+      <div class="filter-group">
+        <div class="filter-group-label">Callsign</div>
+        <input type="text" id="f-call" placeholder="DL,VK,ZL…" oninput="applyFilters()" class="filter-input">
+        <span class="filter-hint">Prefix, comma-sep</span>
+      </div>
+
+      <!-- SNR range -->
+      <div class="filter-group">
+        <div class="filter-group-label">Min SNR</div>
+        <input type="range" id="f-snr-min" min="-30" max="40" value="-30" step="1" oninput="onSnrMinChange()" class="filter-range">
+        <span class="filter-val" id="f-snr-min-val">Any</span>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-label">Max SNR</div>
+        <input type="range" id="f-snr-max" min="-30" max="40" value="40" step="1" oninput="onSnrMaxChange()" class="filter-range">
+        <span class="filter-val" id="f-snr-max-val">Any</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Combined All Spots panel (default open) -->
+  <div class="card card-full" id="card-all">
+    <div class="card-hdr collapsible" onclick="toggleCard('all')">
+      <span class="icon">📋</span> All Spots
+      <span class="stream-pill stream-all">Combined</span>
+      <span class="badge" id="badge-all">0 spots</span>
+      <span class="collapse-icon" id="collapse-all">▲</span>
+    </div>
+    <div class="card-body" id="body-all">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>Type</th>
+              <th>Callsign</th>
+              <th>Freq</th>
+              <th>Band</th>
+              <th>Country</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-all">
+            <tr><td colspan="6" class="no-data">Waiting for spots…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Digital Decodes panel (collapsed by default) -->
+  <div class="card" id="card-decoder">
+    <div class="card-hdr collapsible" onclick="toggleCard('decoder')">
       <span class="icon">📻</span> Digital Decodes
       <span class="stream-pill stream-decoder">FT8 · FT4 · WSPR · JS8</span>
       <span class="badge" id="badge-decoder">0 spots</span>
+      <span class="collapse-icon" id="collapse-decoder">▼</span>
     </div>
-    <div class="table-wrap" id="wrap-decoder">
-      <table>
-        <thead>
-          <tr>
-            <th>UTC</th>
-            <th>Callsign</th>
-            <th>Freq</th>
-            <th>Band</th>
-            <th>Mode</th>
-            <th>SNR</th>
-            <th>Country</th>
-            <th>Info</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-decoder">
-          <tr><td colspan="8" class="no-data">Waiting for digital decodes…</td></tr>
-        </tbody>
-      </table>
+    <div class="card-body collapsed" id="body-decoder">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>Callsign</th>
+              <th>Freq</th>
+              <th>Band</th>
+              <th>Mode</th>
+              <th>SNR</th>
+              <th>Country</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-decoder">
+            <tr><td colspan="8" class="no-data">Waiting for digital decodes…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- CW Skimmer panel -->
+  <!-- CW Skimmer panel (collapsed by default) -->
   <div class="card" id="card-cw">
-    <div class="card-hdr">
-      <span class="icon">🔑</span> CW Spots
+    <div class="card-hdr collapsible" onclick="toggleCard('cw')">
+      <span class="icon">〰</span> CW Spots
       <span class="stream-pill stream-cw">CW Skimmer</span>
       <span class="badge" id="badge-cw">0 spots</span>
+      <span class="collapse-icon" id="collapse-cw">▼</span>
     </div>
-    <div class="table-wrap" id="wrap-cw">
-      <table>
-        <thead>
-          <tr>
-            <th>UTC</th>
-            <th>Callsign</th>
-            <th>Freq</th>
-            <th>Band</th>
-            <th>Mode</th>
-            <th>SNR</th>
-            <th>Country</th>
-            <th>Info</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-cw">
-          <tr><td colspan="8" class="no-data">Waiting for CW spots…</td></tr>
-        </tbody>
-      </table>
+    <div class="card-body collapsed" id="body-cw">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>Callsign</th>
+              <th>Freq</th>
+              <th>Band</th>
+              <th>Mode</th>
+              <th>SNR</th>
+              <th>Country</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-cw">
+            <tr><td colspan="8" class="no-data">Waiting for CW spots…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- Voice Activity panel -->
+  <!-- Voice Activity panel (collapsed by default) -->
   <div class="card" id="card-voice">
-    <div class="card-hdr">
+    <div class="card-hdr collapsible" onclick="toggleCard('voice')">
       <span class="icon">🎙</span> Voice Activity
       <span class="stream-pill stream-voice">SSB · USB · LSB</span>
       <span class="badge" id="badge-voice">0 active</span>
+      <span class="collapse-icon" id="collapse-voice">▼</span>
     </div>
-    <div class="table-wrap" id="wrap-voice">
-      <table>
-        <thead>
-          <tr>
-            <th>UTC</th>
-            <th>Callsign</th>
-            <th>Freq</th>
-            <th>Band</th>
-            <th>Mode</th>
-            <th>SNR</th>
-            <th>Country</th>
-            <th>Info</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-voice">
-          <tr><td colspan="8" class="no-data">Waiting for voice activity…</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="voice-footer">
-      <span class="voice-note">Entries expire after 10 minutes of inactivity</span>
+    <div class="card-body collapsed" id="body-voice">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>Callsign</th>
+              <th>Freq</th>
+              <th>Band</th>
+              <th>Mode</th>
+              <th>SNR</th>
+              <th>Country</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-voice">
+            <tr><td colspan="8" class="no-data">Waiting for voice activity…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="voice-footer">
+        <span class="voice-note">Entries expire after 10 minutes of inactivity</span>
+      </div>
     </div>
   </div>
 
-  <!-- DX Cluster Spots panel -->
+  <!-- DX Cluster Spots panel (collapsed by default) -->
   <div class="card" id="card-dx">
-    <div class="card-hdr">
+    <div class="card-hdr collapsible" onclick="toggleCard('dx')">
       <span class="icon">🌍</span> DX Cluster Spots
       <span class="stream-pill stream-dx">DX Cluster</span>
       <span class="badge" id="badge-dx">0 spots</span>
+      <span class="collapse-icon" id="collapse-dx">▼</span>
     </div>
-    <div class="table-wrap" id="wrap-dx">
-      <table>
-        <thead>
-          <tr>
-            <th>UTC</th>
-            <th>DX Call</th>
-            <th>Freq</th>
-            <th>Band</th>
-            <th>Mode</th>
-            <th>Spotter</th>
-            <th>Country</th>
-            <th>Comment</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-dx">
-          <tr><td colspan="8" class="no-data">Waiting for DX cluster spots…</td></tr>
-        </tbody>
-      </table>
+    <div class="card-body collapsed" id="body-dx">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>DX Call</th>
+              <th>Freq</th>
+              <th>Band</th>
+              <th>Mode</th>
+              <th>Spotter</th>
+              <th>Country</th>
+              <th>Comment</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-dx">
+            <tr><td colspan="8" class="no-data">Waiting for DX cluster spots…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 

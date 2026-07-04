@@ -151,6 +151,9 @@ header {
   .page { grid-template-columns: 1fr 1fr 1fr 1fr; }
 }
 
+/* Full-width card (combined panel) */
+.card-full { grid-column: 1 / -1; }
+
 /* ── Cards ── */
 .card {
   background: var(--surface);
@@ -170,7 +173,14 @@ header {
   color: var(--muted);
   flex-shrink: 0;
 }
+.card-hdr.collapsible { cursor: pointer; user-select: none; }
+.card-hdr.collapsible:hover { background: rgba(255,255,255,0.03); }
 .card-hdr .icon { font-size: 14px; }
+.collapse-icon { margin-left: auto; font-size: 10px; color: var(--dim); }
+
+/* Collapsible card body */
+.card-body { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.card-body.collapsed { display: none; }
 
 .stream-pill {
   padding: 2px 8px; border-radius: 10px;
@@ -181,6 +191,7 @@ header {
 .stream-cw      { background: rgba(245,200,66,0.12); color: var(--gold);   border: 1px solid rgba(245,200,66,0.25); }
 .stream-voice   { background: rgba(34,211,160,0.12); color: var(--green);  border: 1px solid rgba(34,211,160,0.25); }
 .stream-dx      { background: rgba(255,77,109,0.12); color: var(--red);    border: 1px solid rgba(255,77,109,0.25); }
+.stream-all     { background: rgba(167,139,250,0.12); color: var(--purple); border: 1px solid rgba(167,139,250,0.25); }
 
 .badge {
   margin-left: auto;
@@ -247,6 +258,23 @@ tbody tr.new-row-dx { animation: row-flash-dx 0.9s ease-out; }
   100% { background: transparent; }
 }
 
+tbody tr.new-row-all { animation: row-flash-all 0.9s ease-out; }
+@keyframes row-flash-all {
+  0%   { background: rgba(167,139,250,0.12); }
+  100% { background: transparent; }
+}
+
+/* Type badge in combined panel */
+.type-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.type-digital { background: rgba(56,189,248,0.15);  color: var(--blue);   }
+.type-cw      { background: rgba(245,200,66,0.15);  color: var(--gold);   }
+.type-voice   { background: rgba(34,211,160,0.15);  color: var(--green);  }
+.type-dx      { background: rgba(255,77,109,0.15);  color: var(--red);    }
+
 tbody tr.stale { opacity: 0.45; }
 
 td {
@@ -274,6 +302,58 @@ td.muted-col   { color: var(--muted);  font-size: 10px; }
   font-style: italic; padding: 28px;
   font-family: var(--font);
 }
+
+/* ── Filter bar ── */
+.filter-body {
+  display: flex; flex-wrap: wrap; gap: 14px; padding: 12px 14px;
+  align-items: flex-start;
+}
+.filter-group {
+  display: flex; flex-direction: column; gap: 4px; min-width: 100px;
+}
+.filter-group-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+}
+.filter-checks {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.fcheck {
+  display: flex; align-items: center; gap: 4px;
+  cursor: pointer; font-size: 11px; color: var(--text);
+}
+.fcheck input[type=checkbox] { accent-color: var(--blue); cursor: pointer; }
+.fcheck-badge {
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 700;
+}
+.filter-input {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--text); font-family: var(--mono);
+  font-size: 11px; padding: 4px 8px; width: 120px;
+  outline: none; transition: border-color 0.2s;
+}
+.filter-input:focus { border-color: var(--blue); }
+.filter-range { width: 100px; accent-color: var(--blue); cursor: pointer; }
+.filter-val { font-family: var(--mono); font-size: 11px; color: var(--gold); }
+.filter-hint { font-size: 9px; color: var(--dim); }
+.filter-note { font-size: 10px; color: var(--dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.filter-clear-btn {
+  margin-left: auto; padding: 3px 10px; border-radius: 5px;
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--muted); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  cursor: pointer; transition: border-color 0.2s, color 0.2s;
+}
+.filter-clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+select[multiple] {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--text); font-size: 11px;
+  padding: 2px 4px; outline: none; min-width: 80px;
+}
+select[multiple] option { padding: 2px 4px; }
+select[multiple] option:checked { background: var(--blue); color: #000; }
 
 /* ── Voice footer ── */
 .voice-footer {

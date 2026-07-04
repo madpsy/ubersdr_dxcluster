@@ -217,6 +217,15 @@ func parseDXSpot(data []byte) (*Spot, error) {
 }
 
 // parseDecoder converts a raw decoder JSON data line into a Spot.
+// normaliseBand strips the mode suffix from decoder band names.
+// e.g. "20m_FT8" → "20m", "40m_WSPR" → "40m", "40m" → "40m"
+func normaliseBand(band string) string {
+	if idx := strings.IndexByte(band, '_'); idx >= 0 {
+		return band[:idx]
+	}
+	return band
+}
+
 func parseDecoder(data []byte) (*Spot, error) {
 	var e decoderEvent
 	if err := json.Unmarshal(data, &e); err != nil {
@@ -229,7 +238,7 @@ func parseDecoder(data []byte) (*Spot, error) {
 	return &Spot{
 		Stream:      StreamDecoder,
 		Timestamp:   ts,
-		Band:        e.Band,
+		Band:        normaliseBand(e.Band),
 		Callsign:    e.Callsign,
 		FreqHz:      float64(e.Frequency),
 		SNR:         float64(e.SNR),

@@ -38,14 +38,15 @@ const VOICE_EXPIRE  = 10 * 60 * 1000; // 10 minutes in ms
 let countDecoder = 0;
 let countCW      = 0;
 let countDX      = 0;
+let countAll     = 0;
 // Voice activity: keyed by "band|freq" for upsert
 const voiceMap   = new Map(); // key → { spot, tr }
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 let connDecoder, connCW, connVoice, connDX;
-let hdrDecoder, hdrCW, hdrVoice, hdrDX;
-let badgeDecoder, badgeCW, badgeVoice, badgeDX;
-let tbodyDecoder, tbodyCW, tbodyVoice, tbodyDX;
+let hdrDecoder, hdrCW, hdrVoice, hdrDX, hdrTotal;
+let badgeDecoder, badgeCW, badgeVoice, badgeDX, badgeAll;
+let tbodyDecoder, tbodyCW, tbodyVoice, tbodyDX, tbodyAll;
 
 document.addEventListener('DOMContentLoaded', () => {
   connDecoder  = document.getElementById('conn-decoder');
@@ -56,14 +57,17 @@ document.addEventListener('DOMContentLoaded', () => {
   hdrCW        = document.getElementById('hdr-cw');
   hdrVoice     = document.getElementById('hdr-voice');
   hdrDX        = document.getElementById('hdr-dx');
+  hdrTotal     = document.getElementById('hdr-total');
   badgeDecoder = document.getElementById('badge-decoder');
   badgeCW      = document.getElementById('badge-cw');
   badgeVoice   = document.getElementById('badge-voice');
   badgeDX      = document.getElementById('badge-dx');
+  badgeAll     = document.getElementById('badge-all');
   tbodyDecoder = document.getElementById('tbody-decoder');
   tbodyCW      = document.getElementById('tbody-cw');
   tbodyVoice   = document.getElementById('tbody-voice');
   tbodyDX      = document.getElementById('tbody-dx');
+  tbodyAll     = document.getElementById('tbody-all');
 
   // Populate receiver info in header from server-injected globals
   const rxCall = window.RX_CALLSIGN || '';
@@ -162,14 +166,77 @@ async function loadHistory(stream) {
   } catch(_) {}
 }
 
+// ── Card collapse toggle ───────────────────────────────────────────────────
+function toggleCard(id) {
+  const body    = document.getElementById('body-' + id);
+  const icon    = document.getElementById('collapse-' + id);
+  if (!body) return;
+  const collapsed = body.classList.toggle('collapsed');
+  if (icon) icon.textContent = collapsed ? '▼' : '▲';
+}
+
 // ── Spot dispatcher ────────────────────────────────────────────────────────
 function onSpot(spot, live) {
+  onAllSpot(spot, live);   // always feed combined panel
   switch (spot.stream) {
     case 'decoder':   onDecoder(spot, live);  break;
     case 'cwskimmer': onCW(spot, live);       break;
     case 'voice':     onVoice(spot, live);    break;
     case 'dxcluster': onDXSpot(spot, live);   break;
   }
+}
+
+// ── Combined All Spots panel ───────────────────────────────────────────────
+// Columns: UTC | Type | Callsign | Freq | Band | Country
+const STREAM_LABELS = {
+  decoder:   { label: 'Digital', cls: 'type-digital' },
+  cwskimmer: { label: 'CW',      cls: 'type-cw'      },
+  voice:     { label: 'Voice',   cls: 'type-voice'   },
+  dxcluster: { label: 'DX',      cls: 'type-dx'      },
+};
+
+function onAllSpot(spot, live) {
+  if (!tbodyAll) return;
+  clearPlaceholder(tbodyAll);
+  countAll++;
+  if (badgeAll) badgeAll.textContent = countAll + ' spots';
+  if (hdrTotal) hdrTotal.textContent = countAll;
+
+  const meta = STREAM_LABELS[spot.stream] || { label: spot.stream, cls: '' };
+  const flag    = spot.country_code ? countryFlag(spot.country_code) + ' ' : '';
+  const country = spot.country ? flag + esc(spot.country) : '\u2014';
+
+  // Determine mode for filter matching
+  let mode = spot.mode || '';
+  if (spot.stream === 'cwskimmer')  mode = 'CW';
+  if (spot.stream === 'voice')      mode = spot.voice_mode || spot.mode || '';
+  // Band is already normalised server-side (e.g. "20m_FT8" → "20m")
+
+  const tr = document.createElement('tr');
+  if (live) tr.className = 'new-row-all';
+
+  // Store filter-relevant data as attributes
+  tr.dataset.stream  = spot.stream        || '';
+  tr.dataset.band    = spot.band || '';
+  tr.dataset.mode    = mode;
+  tr.dataset.cont    = spot.continent     || '';
+  tr.dataset.country = spot.country_code  || '';
+  tr.dataset.call    = spot.callsign      || '';
+  tr.dataset.snr     = isNaN(spot.snr) ? '' : String(spot.snr);
+
+  tr.innerHTML =
+    '<td class="ts-col">'      + fmtUTC(spot.timestamp)                    + '</td>' +
+    '<td><span class="type-badge ' + meta.cls + '">' + meta.label + '</span></td>' +
+    '<td class="call-col">'    + esc(spot.callsign || '\u2014')             + '</td>' +
+    '<td class="freq-col">'    + fmtFreq(spot.freq_hz)                      + '</td>' +
+    '<td class="band-col">'    + esc(spot.band || '\u2014')                 + '</td>' +
+    '<td class="country-col">' + country                                    + '</td>';
+
+  // Apply current filter before inserting
+  if (!rowMatchesFilter(tr)) tr.style.display = 'none';
+
+  tbodyAll.insertBefore(tr, tbodyAll.firstChild);
+  trimTable(tbodyAll, MAX_ROWS);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -229,6 +296,157 @@ function buildRow(fields) {
     '<td class="country-col">' + country                         + '</td>' +
     '<td class="info-col">'    + (fields.info || '\u2014')       + '</td>';
   return tr;
+}
+
+// ── Filter logic (combined panel only) ────────────────────────────────────
+
+// Stream type → mode values produced by that stream
+const STREAM_MODES = {
+  decoder:   ['FT8','FT4','WSPR','JS8','FT2'],
+  cwskimmer: ['CW'],
+  voice:     ['USB','LSB'],
+  dxcluster: [],   // no mode field
+};
+
+function getCheckedModes() {
+  const map = {
+    'f-mode-ft8':  'FT8',  'f-mode-ft4':  'FT4',
+    'f-mode-wspr': 'WSPR', 'f-mode-js8':  'JS8',
+    'f-mode-cw':   'CW',   'f-mode-usb':  'USB',
+    'f-mode-lsb':  'LSB',
+  };
+  const checked = new Set();
+  for (const [id, mode] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && el.checked) checked.add(mode);
+  }
+  return checked;
+}
+
+function getSelectedOptions(selectId) {
+  const el = document.getElementById(selectId);
+  if (!el) return [];
+  return Array.from(el.selectedOptions)
+    .map(o => o.value)
+    .filter(v => v !== '');
+}
+
+function getTextList(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el || !el.value.trim()) return [];
+  return el.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+}
+
+function rowMatchesFilter(tr) {
+  // Read current filter state
+  const showDigital = document.getElementById('f-type-digital')?.checked ?? true;
+  const showCW      = document.getElementById('f-type-cw')?.checked      ?? true;
+  const showVoice   = document.getElementById('f-type-voice')?.checked    ?? true;
+  const showDX      = document.getElementById('f-type-dx')?.checked       ?? true;
+
+  const checkedModes = getCheckedModes();
+  const bands        = getSelectedOptions('f-band');
+  const conts        = getSelectedOptions('f-cont');
+  const countries    = getTextList('f-country');
+  const callPfx      = getTextList('f-call');
+
+  const snrMinEl = document.getElementById('f-snr-min');
+  const snrMaxEl = document.getElementById('f-snr-max');
+  const snrMin   = snrMinEl ? parseInt(snrMinEl.value, 10) : -30;
+  const snrMax   = snrMaxEl ? parseInt(snrMaxEl.value, 10) : 40;
+  const snrMinActive = snrMin > -30;
+  const snrMaxActive = snrMax < 40;
+
+  // Read data attributes stored on the row
+  const stream  = tr.dataset.stream  || '';
+  const band    = (tr.dataset.band    || '').toUpperCase();
+  const mode    = (tr.dataset.mode    || '').toUpperCase();
+  const cont    = (tr.dataset.cont    || '').toUpperCase();
+  const country = (tr.dataset.country || '').toUpperCase();
+  const call    = (tr.dataset.call    || '').toUpperCase();
+  const snr     = parseFloat(tr.dataset.snr || 'NaN');
+
+  // Stream type toggle
+  if (stream === 'decoder'   && !showDigital) return false;
+  if (stream === 'cwskimmer' && !showCW)      return false;
+  if (stream === 'voice'     && !showVoice)   return false;
+  if (stream === 'dxcluster' && !showDX)      return false;
+
+  // Mode filter — only applies if the stream has modes
+  if (STREAM_MODES[stream] && STREAM_MODES[stream].length > 0) {
+    if (mode && !checkedModes.has(mode)) return false;
+  }
+
+  // Band filter
+  if (bands.length > 0 && band && !bands.map(b => b.toUpperCase()).includes(band)) return false;
+
+  // Continent filter
+  if (conts.length > 0 && cont && !conts.map(c => c.toUpperCase()).includes(cont)) return false;
+
+  // Country filter
+  if (countries.length > 0 && country && !countries.includes(country)) return false;
+
+  // Callsign prefix filter
+  if (callPfx.length > 0 && call) {
+    if (!callPfx.some(pfx => call.startsWith(pfx))) return false;
+  }
+
+  // SNR filter
+  if (snrMinActive && !isNaN(snr) && snr < snrMin) return false;
+  if (snrMaxActive && !isNaN(snr) && snr > snrMax) return false;
+
+  return true;
+}
+
+function applyFilters() {
+  if (!tbodyAll) return;
+  const rows = tbodyAll.querySelectorAll('tr[data-stream]');
+  rows.forEach(tr => {
+    tr.style.display = rowMatchesFilter(tr) ? '' : 'none';
+  });
+}
+
+function onSnrMinChange() {
+  const el  = document.getElementById('f-snr-min');
+  const val = document.getElementById('f-snr-min-val');
+  if (el && val) val.textContent = parseInt(el.value, 10) <= -30 ? 'Any' : el.value + ' dB';
+  applyFilters();
+}
+
+function onSnrMaxChange() {
+  const el  = document.getElementById('f-snr-max');
+  const val = document.getElementById('f-snr-max-val');
+  if (el && val) val.textContent = parseInt(el.value, 10) >= 40 ? 'Any' : el.value + ' dB';
+  applyFilters();
+}
+
+function clearAllFilters() {
+  // Reset stream toggles
+  ['f-type-digital','f-type-cw','f-type-voice','f-type-dx'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = true;
+  });
+  // Reset mode checkboxes
+  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-cw','f-mode-usb','f-mode-lsb'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = true;
+  });
+  // Reset multi-selects (deselect all)
+  ['f-band','f-cont'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) Array.from(el.options).forEach(o => o.selected = false);
+  });
+  // Reset text inputs
+  ['f-country','f-call'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  // Reset SNR sliders
+  const snrMin = document.getElementById('f-snr-min');
+  const snrMax = document.getElementById('f-snr-max');
+  if (snrMin) { snrMin.value = -30; document.getElementById('f-snr-min-val').textContent = 'Any'; }
+  if (snrMax) { snrMax.value = 40;  document.getElementById('f-snr-max-val').textContent = 'Any'; }
+  applyFilters();
 }
 
 // ── Digital Decoder ────────────────────────────────────────────────────────
