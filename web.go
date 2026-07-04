@@ -82,6 +82,7 @@ func (w *WebServer) ListenAndServe() error {
 	// REST history endpoints
 	mux.HandleFunc("/api/spots", w.handleSpots)
 	mux.HandleFunc("/api/status", w.handleStatus)
+	mux.HandleFunc("/api/help", w.handleHelp)
 
 	log.Printf("[web] listening on %s", w.addr)
 	return http.ListenAndServe(w.addr, mux)
@@ -168,6 +169,13 @@ func (w *WebServer) handleSpots(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(rw).Encode(spots)
+}
+
+// handleHelp returns the telnet help text as plain text — single source of truth.
+func (w *WebServer) handleHelp(rw http.ResponseWriter, r *http.Request) {
+	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
+	fmt.Fprint(rw, helpText)
 }
 
 // handleStatus returns a simple health/status JSON including telnet client count.

@@ -45,6 +45,7 @@
   </div>
 
   <div class="hdr-spacer"></div>
+  <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 
   <div class="stat-pill" id="telnet-pill" style="display:none">
     <span class="lbl">Telnet</span>
@@ -57,6 +58,17 @@
   <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
   <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
 </header>
+
+<!-- Help modal -->
+<div id="help-overlay" onclick="if(event.target===this)closeHelpModal()">
+  <div id="help-modal">
+    <div id="help-modal-hdr">
+      <span>📡</span> Telnet Command Reference
+      <button id="help-close" onclick="closeHelpModal()">×</button>
+    </div>
+    <div id="help-body">Loading…</div>
+  </div>
+</div>
 
 <div class="page">
 

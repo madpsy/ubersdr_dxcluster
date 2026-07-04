@@ -1,5 +1,35 @@
 'use strict';
 
+// ── Help modal ─────────────────────────────────────────────────────────────
+let helpLoaded = false;
+
+function openHelpModal() {
+  const overlay = document.getElementById('help-overlay');
+  if (overlay) overlay.classList.add('open');
+  if (!helpLoaded) {
+    fetch(BASE + '/api/help')
+      .then(r => r.text())
+      .then(text => {
+        const body = document.getElementById('help-body');
+        if (body) body.textContent = text;
+        helpLoaded = true;
+      })
+      .catch(() => {
+        const body = document.getElementById('help-body');
+        if (body) body.textContent = 'Failed to load help.';
+      });
+  }
+}
+
+function closeHelpModal() {
+  const overlay = document.getElementById('help-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeHelpModal();
+});
+
 const BASE          = window.BASE_PATH || '';
 const MAX_ROWS      = 200;
 const VOICE_EXPIRE  = 10 * 60 * 1000; // 10 minutes in ms

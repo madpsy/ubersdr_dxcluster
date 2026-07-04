@@ -257,9 +257,10 @@ FILTERING  (filters are AND-combined; multiple values within a field are OR-comb
                                        set/filter mode FT8,FT4,WSPR
 
   set/filter type <types>       Filter by activity type (comma-separated)
-                                  Types: digital  cw  voice
+                                  Types: digital  cw  voice  dx
                                   e.g. set/filter type cw
                                        set/filter type digital,cw
+                                       set/filter type dx
 
   set/filter cont <conts>       Filter by continent (comma-separated)
                                   Codes: EU NA SA AF AS OC AN
