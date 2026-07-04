@@ -9,6 +9,7 @@
     window.RX_CALLSIGN  = "{{.Callsign}}";
     window.RX_NAME      = "{{.Name}}";
     window.RX_LOCATION  = "{{.Location}}";
+    window.TELNET_ADDR  = "{{.TelnetAddr}}";
   </script>
   <link rel="stylesheet" href="{{.BasePath}}/static/style.css">
 </head>
@@ -41,6 +42,12 @@
 
   <div class="hdr-spacer"></div>
 
+  <div class="stat-pill" id="telnet-pill" style="display:none">
+    <span class="lbl">Telnet</span>
+    <span class="val" id="hdr-telnet-port">—</span>
+    <span class="lbl" style="margin-left:6px">Clients</span>
+    <span class="val" id="hdr-telnet-clients">0</span>
+  </div>
   <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
   <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
   <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>

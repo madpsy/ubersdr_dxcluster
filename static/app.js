@@ -42,9 +42,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (callEl) callEl.textContent = rxCall;
     if (locEl)  locEl.textContent  = rxLoc || rxName;
     if (rxCall) document.title = '\uD83D\uDCE1 ' + rxCall + ' DX Cluster';
-  }
-
-  connect();
+    }
+  
+    // Show telnet port badge from server-injected global
+    const telnetAddr = window.TELNET_ADDR || '';
+    if (telnetAddr) {
+      const pill    = document.getElementById('telnet-pill');
+      const portEl  = document.getElementById('hdr-telnet-port');
+      // Extract port number from ":7300" or "0.0.0.0:7300"
+      const port = telnetAddr.split(':').pop();
+      if (pill)   pill.style.display = 'flex';
+      if (portEl) portEl.textContent = port;
+    }
+  
+    connect();
+  
+    // Poll /api/status every 10 s for telnet client count
+    pollStatus();
+    setInterval(pollStatus, 10_000);
 
   // Load history for all three panels
   loadHistory('decoder');
@@ -77,6 +92,19 @@ function connect() {
   es.onerror = () => {
     setConnState('disconnected');
   };
+}
+
+// ── Status polling ─────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const resp = await fetch(BASE + '/api/status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const clientsEl = document.getElementById('hdr-telnet-clients');
+    if (clientsEl && typeof data.telnet_clients === 'number') {
+      clientsEl.textContent = data.telnet_clients;
+    }
+  } catch(_) {}
 }
 
 function setConnState(state) {

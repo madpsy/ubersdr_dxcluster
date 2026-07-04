@@ -95,11 +95,11 @@ func main() {
 	}()
 
 	// Start web server
-	web, err := NewWebServer(*webListen, ReceiverInfo{
+	web, err := NewWebServer(*webListen, *telnetListen, ReceiverInfo{
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,
-	}, hub)
+	}, telnet, hub)
 	if err != nil {
 		log.Fatalf("web server init: %v", err)
 	}

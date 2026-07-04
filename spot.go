@@ -53,38 +53,38 @@ type Spot struct {
 	BearingDeg float64 `json:"bearing_deg,omitempty"`
 }
 
-// FormatDXCluster returns a standard AR-Cluster/DX Spider spot line:
+// FormatDXCluster returns a standard AR-Cluster/DX Spider spot line matching
+// the format used by real skimmer networks (e.g. RBN):
 //
-//	DX de <spotter>:  <freq kHz>  <callsign>    <comment>    <HHMM>Z <DD> <Mon>
+//	DX de MM9PSY-#:  14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
+//
+// The spotter always uses the receiver's callsign with "-#" suffix (skimmer convention).
 func (s *Spot) FormatDXCluster(defaultSpotter string) string {
-	spotter := defaultSpotter
-	if s.Spotter != "" {
-		spotter = s.Spotter
-	}
+	// Skimmer callsigns use "-#" suffix by convention
+	spotter := defaultSpotter + "-#"
 
 	freqKHz := s.FreqHz / 1000.0
+
+	ts := s.Timestamp.UTC()
+	timeStr := fmt.Sprintf("%02d%02dZ", ts.Hour(), ts.Minute())
 
 	var comment string
 	switch s.Stream {
 	case StreamDecoder:
-		comment = fmt.Sprintf("%s %ddB", s.Mode, int(s.SNR))
+		comment = fmt.Sprintf("%s %d dB", s.Mode, int(s.SNR))
 	case StreamCWSkimmer:
-		comment = fmt.Sprintf("CQ %dwpm %ddB", s.WPM, int(s.SNR))
-		if s.Comment != "" {
-			comment = fmt.Sprintf("%s %dwpm %ddB", s.Comment, s.WPM, int(s.SNR))
+		cwComment := s.Comment
+		if cwComment == "" {
+			cwComment = ""
 		}
+		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, cwComment)
 	case StreamVoiceActivity:
-		comment = fmt.Sprintf("%s SNR%.1f conf%.2f", s.VoiceMode, s.SNR, s.Confidence)
+		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
 	}
 
-	ts := s.Timestamp.UTC()
-	timeStr := fmt.Sprintf("%02d%02dZ %02d %s",
-		ts.Hour(), ts.Minute(),
-		ts.Day(), ts.Format("Jan"))
-
-	// Standard DX cluster line format (80 chars wide):
-	// DX de SPOTTER:   FFFFF.F  CALLSIGN      COMMENT                HHMMZ DD Mon
-	return fmt.Sprintf("DX de %-9s %8.1f  %-12s  %-22s %s",
+	// Standard RBN/DX cluster format:
+	// DX de SPOTTER:  FFFFF.F  CALLSIGN       COMMENT         HHMMZ
+	return fmt.Sprintf("DX de %-12s %8.1f  %-13s  %-29s %s",
 		spotter+":", freqKHz, s.Callsign, comment, timeStr)
 }
 

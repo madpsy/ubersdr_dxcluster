@@ -17,12 +17,14 @@ var staticFiles embed.FS
 
 // WebServer serves the web UI and SSE relay endpoint.
 type WebServer struct {
-	addr       string
-	hub        *Hub
-	rxCallsign string
-	rxName     string
-	rxLocation string
-	tmpl       *template.Template
+	addr        string
+	hub         *Hub
+	telnet      *TelnetServer
+	rxCallsign  string
+	rxName      string
+	rxLocation  string
+	telnetAddr  string
+	tmpl        *template.Template
 }
 
 // ReceiverInfo holds static data fetched from /api/description at startup.
@@ -32,7 +34,7 @@ type ReceiverInfo struct {
 	Location string
 }
 
-func NewWebServer(addr string, rx ReceiverInfo, hub *Hub) (*WebServer, error) {
+func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, telnet *TelnetServer, hub *Hub) (*WebServer, error) {
 	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read index.html: %w", err)
@@ -44,9 +46,11 @@ func NewWebServer(addr string, rx ReceiverInfo, hub *Hub) (*WebServer, error) {
 	return &WebServer{
 		addr:       addr,
 		hub:        hub,
+		telnet:     telnet,
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
+		telnetAddr: telnetAddr,
 		tmpl:       tmpl,
 	}, nil
 }
@@ -91,15 +95,17 @@ func (w *WebServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
 	bp := basePath(r)
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = w.tmpl.Execute(rw, struct {
-		BasePath string
-		Callsign string
-		Name     string
-		Location string
+		BasePath   string
+		Callsign   string
+		Name       string
+		Location   string
+		TelnetAddr string
 	}{
-		BasePath: bp,
-		Callsign: w.rxCallsign,
-		Name:     w.rxName,
-		Location: w.rxLocation,
+		BasePath:   bp,
+		Callsign:   w.rxCallsign,
+		Name:       w.rxName,
+		Location:   w.rxLocation,
+		TelnetAddr: w.telnetAddr,
 	})
 }
 
@@ -164,13 +170,21 @@ func (w *WebServer) handleSpots(rw http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(rw).Encode(spots)
 }
 
-// handleStatus returns a simple health/status JSON.
+// handleStatus returns a simple health/status JSON including telnet client count.
 func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.Header().Set("Access-Control-Allow-Origin", "*")
+
+	telnetClients := 0
+	if w.telnet != nil {
+		telnetClients = w.telnet.ClientCount()
+	}
+
 	_ = json.NewEncoder(rw).Encode(map[string]interface{}{
-		"status": "ok",
-		"ts":     time.Now().UTC().Format(time.RFC3339),
+		"status":         "ok",
+		"ts":             time.Now().UTC().Format(time.RFC3339),
+		"telnet_addr":    w.telnetAddr,
+		"telnet_clients": telnetClients,
 		"streams": []string{
 			string(StreamDecoder),
 			string(StreamCWSkimmer),

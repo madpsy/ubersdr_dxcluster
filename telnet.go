@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync/atomic"
 )
 
 // TelnetServer listens for DX cluster client connections and streams spots
@@ -14,10 +15,16 @@ type TelnetServer struct {
 	addr        string
 	hub         *Hub
 	spotterCall string
+	clients     atomic.Int32
 }
 
 func NewTelnetServer(addr string, hub *Hub, spotterCall string) *TelnetServer {
 	return &TelnetServer{addr: addr, hub: hub, spotterCall: spotterCall}
+}
+
+// ClientCount returns the number of currently connected telnet clients.
+func (t *TelnetServer) ClientCount() int {
+	return int(t.clients.Load())
 }
 
 // ListenAndServe starts the telnet listener. Blocks until the listener fails.
@@ -40,10 +47,12 @@ func (t *TelnetServer) ListenAndServe() error {
 
 func (t *TelnetServer) handleConn(conn net.Conn) {
 	remote := conn.RemoteAddr().String()
-	log.Printf("[telnet] client connected: %s", remote)
+	t.clients.Add(1)
+	log.Printf("[telnet] client connected: %s (total: %d)", remote, t.clients.Load())
 	defer func() {
+		t.clients.Add(-1)
 		conn.Close()
-		log.Printf("[telnet] client disconnected: %s", remote)
+		log.Printf("[telnet] client disconnected: %s (total: %d)", remote, t.clients.Load())
 	}()
 
 	// Send login banner
