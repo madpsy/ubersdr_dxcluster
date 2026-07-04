@@ -390,7 +390,7 @@ func (t *TelnetServer) handleConn(conn net.Conn) {
 	if t.rxLocation != "" {
 		fmt.Fprintf(conn, "Location  : %s\r\n", t.rxLocation)
 	}
-	fmt.Fprintf(conn, "Streaming live Digital, CW and Voice spots from UberSDR.\r\n\r\n")
+	fmt.Fprintf(conn, "Streaming live Digital, CW, Voice and DX Cluster spots from UberSDR.\r\n\r\n")
 
 	if t.requireLogin {
 		fmt.Fprintf(conn, "Please enter your callsign: ")
@@ -411,7 +411,7 @@ func (t *TelnetServer) handleConn(conn net.Conn) {
 
 	// ── Banner ─────────────────────────────────────────────────────────────
 	fmt.Fprintf(conn, "Hello de %s DX Cluster\r\n", t.spotterCall)
-	fmt.Fprintf(conn, "Streaming live spots from UberSDR (Digital / CW / Voice)\r\n")
+	fmt.Fprintf(conn, "Streaming live spots from UberSDR (Digital / CW / Voice / DX Cluster)\r\n")
 	fmt.Fprintf(conn, "Type HELP for a full list of commands, or BYE to disconnect.\r\n\r\n")
 
 	// Subscribe to hub
