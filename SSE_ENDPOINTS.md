@@ -1,7 +1,7 @@
 # UberSDR Server-Sent Events (SSE) Endpoints
 
-UberSDR exposes three public SSE endpoints for real-time spot and signal data.
-All three share the same connection model:
+UberSDR exposes four public SSE endpoints for real-time spot and signal data.
+All four share the same connection model:
 
 - **Protocol:** `text/event-stream` (standard SSE / EventSource)
 - **Access:** Public — no authentication required
@@ -14,7 +14,7 @@ All three share the same connection model:
   retry: 3000
   ```
 - **503 response:** Returned when the underlying subsystem (decoder, CW skimmer,
-  or noise floor monitor) is not enabled on this instance.
+  noise floor monitor, or DX cluster) is not enabled on this instance.
 
 ---
 
@@ -299,6 +299,78 @@ server started.
 
 ---
 
+## 4. DX Cluster Stream
+
+```
+GET /api/dxcluster/stream
+```
+
+Streams real-time DX spots received from the configured DX cluster server
+(e.g. DXSpider). Returns 503 if the DX cluster is not enabled in the server
+configuration.
+
+### Query Parameters
+
+| Parameter  | Type   | Description |
+|------------|--------|-------------|
+| `band`     | string | Filter to a single amateur band, e.g. `20m`. Omit for all bands. |
+| `callsign` | string | Comma-delimited list of up to 20 DX callsigns to watch (exact match, case-insensitive), e.g. `DL1ABC,W1AW`. Omit for all callsigns. |
+
+### Data Event
+
+One event per DX spot. Fired immediately when the cluster delivers a spot.
+
+```
+data: { ... }
+```
+
+#### JSON Fields
+
+| Field          | Type    | Always present | Description |
+|----------------|---------|:--------------:|-------------|
+| `type`         | string  | ✓ | Always `"dx_spot"` |
+| `frequency`    | float   | ✓ | Spot frequency in Hz |
+| `dx_call`      | string  | ✓ | Callsign being spotted |
+| `spotter`      | string  | ✓ | Callsign of the station that spotted the DX |
+| `band`         | string  | ✓ | Amateur band label, e.g. `"20m"` |
+| `timestamp`    | string  | ✓ | ISO 8601 UTC timestamp of the spot |
+| `comment`      | string  | — | Free-text comment from the spotter (e.g. `"CQ FT8"`) |
+| `country`      | string  | — | DXCC entity name for the DX callsign |
+| `country_code` | string  | — | ISO 3166-1 alpha-2 country code for the DX callsign |
+| `continent`    | string  | — | Continent code: `EU`, `NA`, `SA`, `AF`, `AS`, `OC`, `AN` |
+| `time_offset`  | float   | — | UTC offset in hours at the DX station's location (from CTY database) |
+
+#### Example
+
+```json
+{
+  "type": "dx_spot",
+  "frequency": 14225000,
+  "dx_call": "DL1ABC",
+  "spotter": "MM3NDH",
+  "comment": "CQ FT8",
+  "band": "20m",
+  "country": "Germany",
+  "country_code": "DE",
+  "continent": "EU",
+  "time_offset": 1.0,
+  "timestamp": "2026-07-04T15:00:00Z"
+}
+```
+
+### Heartbeat Event
+
+Sent every **30 seconds** to keep the connection alive.
+
+```
+event: heartbeat
+data: {"last_spot": "2026-07-04T15:00:00Z"}
+```
+
+`last_spot` is `null` if no spot has been received since the server started.
+
+---
+
 ## Connection Example (JavaScript)
 
 ```javascript
@@ -319,5 +391,5 @@ es.onerror = () => {
 };
 ```
 
-The same pattern applies to `/api/decoder/stream` and `/api/cwskimmer/stream`,
-substituting the appropriate event field names.
+The same pattern applies to `/api/decoder/stream`, `/api/cwskimmer/stream`,
+and `/api/dxcluster/stream`, substituting the appropriate event field names.

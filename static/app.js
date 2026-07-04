@@ -7,28 +7,33 @@ const VOICE_EXPIRE  = 10 * 60 * 1000; // 10 minutes in ms
 // ── State ──────────────────────────────────────────────────────────────────
 let countDecoder = 0;
 let countCW      = 0;
+let countDX      = 0;
 // Voice activity: keyed by "band|freq" for upsert
 const voiceMap   = new Map(); // key → { spot, tr }
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-let connDecoder, connCW, connVoice;
-let hdrDecoder, hdrCW, hdrVoice;
-let badgeDecoder, badgeCW, badgeVoice;
-let tbodyDecoder, tbodyCW, tbodyVoice;
+let connDecoder, connCW, connVoice, connDX;
+let hdrDecoder, hdrCW, hdrVoice, hdrDX;
+let badgeDecoder, badgeCW, badgeVoice, badgeDX;
+let tbodyDecoder, tbodyCW, tbodyVoice, tbodyDX;
 
 document.addEventListener('DOMContentLoaded', () => {
   connDecoder  = document.getElementById('conn-decoder');
   connCW       = document.getElementById('conn-cw');
   connVoice    = document.getElementById('conn-voice');
+  connDX       = document.getElementById('conn-dx');
   hdrDecoder   = document.getElementById('hdr-decoder');
   hdrCW        = document.getElementById('hdr-cw');
   hdrVoice     = document.getElementById('hdr-voice');
+  hdrDX        = document.getElementById('hdr-dx');
   badgeDecoder = document.getElementById('badge-decoder');
   badgeCW      = document.getElementById('badge-cw');
   badgeVoice   = document.getElementById('badge-voice');
+  badgeDX      = document.getElementById('badge-dx');
   tbodyDecoder = document.getElementById('tbody-decoder');
   tbodyCW      = document.getElementById('tbody-cw');
   tbodyVoice   = document.getElementById('tbody-voice');
+  tbodyDX      = document.getElementById('tbody-dx');
 
   // Populate receiver info in header from server-injected globals
   const rxCall = window.RX_CALLSIGN || '';
@@ -61,10 +66,11 @@ document.addEventListener('DOMContentLoaded', () => {
     pollStatus();
     setInterval(pollStatus, 10_000);
 
-  // Load history for all three panels
+  // Load history for all four panels
   loadHistory('decoder');
   loadHistory('cwskimmer');
   loadHistory('voice');
+  loadHistory('dxcluster');
 
   // Periodically age out stale voice entries
   setInterval(pruneVoice, 30_000);
@@ -108,7 +114,7 @@ async function pollStatus() {
 }
 
 function setConnState(state) {
-  [connDecoder, connCW, connVoice].forEach(el => {
+  [connDecoder, connCW, connVoice, connDX].forEach(el => {
     if (!el) return;
     el.className = 'conn-pill ' + state;
   });
@@ -132,6 +138,7 @@ function onSpot(spot, live) {
     case 'decoder':   onDecoder(spot, live);  break;
     case 'cwskimmer': onCW(spot, live);       break;
     case 'voice':     onVoice(spot, live);    break;
+    case 'dxcluster': onDXSpot(spot, live);   break;
   }
 }
 
@@ -250,6 +257,41 @@ function onCW(spot, live) {
 
   tbodyCW.insertBefore(tr, tbodyCW.firstChild);
   trimTable(tbodyCW, MAX_ROWS);
+}
+
+// ── DX Cluster Spots ───────────────────────────────────────────────────────
+function onDXSpot(spot, live) {
+  clearPlaceholder(tbodyDX);
+  countDX++;
+  hdrDX.textContent   = countDX;
+  badgeDX.textContent = countDX + ' spots';
+
+  // Info: comment from spotter
+  const info = spot.comment ? esc(spot.comment) : '\u2014';
+
+  const tr = buildRow({
+    ts:           spot.timestamp,
+    callsign:     esc(spot.callsign),   // dx_call mapped to callsign in spot.go
+    freq_hz:      spot.freq_hz,
+    band:         spot.band,
+    mode:         '\u2014',             // DX spots don't carry mode
+    snr:          null,                 // no SNR for DX spots
+    country:      spot.country,
+    country_code: spot.country_code,
+    info:         info,
+  });
+
+  // Override the SNR cell with the spotter callsign instead
+  const cells = tr.querySelectorAll('td');
+  if (cells[5]) {
+    cells[5].className = 'muted-col';
+    cells[5].textContent = spot.spotter ? esc(spot.spotter) : '\u2014';
+  }
+
+  if (live) tr.className = 'new-row-dx';
+
+  tbodyDX.insertBefore(tr, tbodyDX.firstChild);
+  trimTable(tbodyDX, MAX_ROWS);
 }
 
 // ── Voice Activity ─────────────────────────────────────────────────────────

@@ -44,6 +44,12 @@ func StartConsumers(ctx context.Context, baseURL string, hub *Hub) {
 			Parse:  parseVoiceActivity,
 			Stream: StreamVoiceActivity,
 		},
+		{
+			Name:   "dxcluster",
+			Path:   "/api/dxcluster/stream",
+			Parse:  parseDXSpot,
+			Stream: StreamDXCluster,
+		},
 	}
 
 	for _, sc := range streams {

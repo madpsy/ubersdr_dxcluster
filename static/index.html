@@ -39,6 +39,10 @@
     <div class="conn-dot"></div>
     <span>Voice</span>
   </div>
+  <div class="conn-pill disconnected" id="conn-dx">
+    <div class="conn-dot"></div>
+    <span>DX</span>
+  </div>
 
   <div class="hdr-spacer"></div>
 
@@ -51,6 +55,7 @@
   <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
   <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
   <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
+  <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
 </header>
 
 <div class="page">
@@ -139,6 +144,34 @@
     </div>
     <div class="voice-footer">
       <span class="voice-note">Entries expire after 10 minutes of inactivity</span>
+    </div>
+  </div>
+
+  <!-- DX Cluster Spots panel -->
+  <div class="card" id="card-dx">
+    <div class="card-hdr">
+      <span class="icon">🌍</span> DX Cluster Spots
+      <span class="stream-pill stream-dx">DX Spider</span>
+      <span class="badge" id="badge-dx">0 spots</span>
+    </div>
+    <div class="table-wrap" id="wrap-dx">
+      <table>
+        <thead>
+          <tr>
+            <th>UTC</th>
+            <th>DX Call</th>
+            <th>Freq</th>
+            <th>Band</th>
+            <th>Mode</th>
+            <th>Spotter</th>
+            <th>Country</th>
+            <th>Comment</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-dx">
+          <tr><td colspan="8" class="no-data">Waiting for DX cluster spots…</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 

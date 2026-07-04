@@ -84,31 +84,47 @@ func (t *TelnetServer) ListenAndServe() error {
 
 // ClientState holds per-connection state including filters and toggles.
 type ClientState struct {
-	Filter    ClientFilter
-	WantDX    bool // receive spots at all (set/dx / unset/dx)
-	WantRBN   bool // receive CW/RBN spots (set/rbn / unset/rbn)
-	WantVoice bool // receive voice activity spots
-	Name      string
+	Filter       ClientFilter
+	WantAll      bool // receive any spots at all (set/spots / unset/spots)
+	WantDigital  bool // receive digital decoder spots
+	WantRBN      bool // receive CW/RBN spots (set/rbn / unset/rbn)
+	WantVoice    bool // receive voice activity spots
+	WantDXCluster bool // receive DX cluster spots
+	Name         string
 }
 
 func newClientState() *ClientState {
 	return &ClientState{
-		WantDX:    true,
-		WantRBN:   true,
-		WantVoice: true,
+		WantAll:       true,
+		WantDigital:   true,
+		WantRBN:       true,
+		WantVoice:     true,
+		WantDXCluster: true,
 	}
 }
 
 // ShouldSend returns true if the spot should be sent to this client.
 func (s *ClientState) ShouldSend(spot Spot) bool {
-	if !s.WantDX {
+	if !s.WantAll {
 		return false
 	}
-	if !s.WantRBN && spot.Stream == StreamCWSkimmer {
-		return false
-	}
-	if !s.WantVoice && spot.Stream == StreamVoiceActivity {
-		return false
+	switch spot.Stream {
+	case StreamDecoder:
+		if !s.WantDigital {
+			return false
+		}
+	case StreamCWSkimmer:
+		if !s.WantRBN {
+			return false
+		}
+	case StreamVoiceActivity:
+		if !s.WantVoice {
+			return false
+		}
+	case StreamDXCluster:
+		if !s.WantDXCluster {
+			return false
+		}
 	}
 	return s.Filter.Match(spot)
 }
@@ -275,15 +291,25 @@ CLEARING FILTERS
   clear/filter snr              Clear minimum SNR filter
   clear/filter maxsnr           Clear maximum SNR filter
 
-SPOT STREAM TOGGLES
-  set/dx                        Enable receiving all spots (default: on)
-  unset/dx                      Disable all spots
-  set/rbn                       Enable CW/RBN spots (default: on)
-  unset/rbn                     Disable CW/RBN spots
+SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
+  set/dx                        Enable ALL spots (DX Spider compat, default: on)
+  unset/dx                      Disable ALL spots
+
+  set/digital                   Enable digital decoder spots (FT8/FT4/WSPR/JS8, default: on)
+  unset/digital                 Disable digital decoder spots
+
+  set/rbn                       Enable CW/RBN skimmer spots (default: on)
+  unset/rbn                     Disable CW/RBN skimmer spots
   set/skimmer                   Alias for set/rbn
   unset/skimmer                 Alias for unset/rbn
+
   set/voice                     Enable voice activity spots (default: on)
   unset/voice                   Disable voice activity spots
+
+  set/dxcluster                 Enable DX cluster spots from DX Spider (default: on)
+  unset/dxcluster               Disable DX cluster spots
+  set/cluster                   Alias for set/dxcluster
+  unset/cluster                 Alias for unset/dxcluster
 
 DX SPIDER COMPATIBILITY (mapped to set/filter)
   accept/spots on <band>        Accept spots on band  → set/filter band <band>
@@ -494,11 +520,19 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 
 	// ── Stream toggles ─────────────────────────────────────────────────────
 	case "set/dx":
-		state.WantDX = true
-		return "DX spots enabled."
+		// DX Spider compat: set/dx means "enable all spots"
+		state.WantAll = true
+		return "All spots enabled."
 	case "unset/dx":
-		state.WantDX = false
-		return "DX spots disabled."
+		state.WantAll = false
+		return "All spots disabled."
+
+	case "set/digital":
+		state.WantDigital = true
+		return "Digital decoder spots enabled."
+	case "unset/digital":
+		state.WantDigital = false
+		return "Digital decoder spots disabled."
 
 	case "set/rbn", "set/skimmer":
 		state.WantRBN = true
@@ -513,6 +547,13 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 	case "unset/voice":
 		state.WantVoice = false
 		return "Voice activity spots disabled."
+
+	case "set/dxcluster", "set/cluster":
+		state.WantDXCluster = true
+		return "DX cluster spots enabled."
+	case "unset/dxcluster", "unset/cluster":
+		state.WantDXCluster = false
+		return "DX cluster spots disabled."
 
 	// ── DX Spider accept/reject compatibility ──────────────────────────────
 	// accept/spots on <band>  → set/filter band <band>
@@ -685,6 +726,8 @@ func parseTypes(vals []string) []StreamType {
 			out = append(out, StreamCWSkimmer)
 		case "voice", "voiceactivity":
 			out = append(out, StreamVoiceActivity)
+		case "dx", "dxcluster", "cluster":
+			out = append(out, StreamDXCluster)
 		}
 	}
 	return out

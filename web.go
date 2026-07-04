@@ -189,6 +189,7 @@ func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 			string(StreamDecoder),
 			string(StreamCWSkimmer),
 			string(StreamVoiceActivity),
+			string(StreamDXCluster),
 		},
 	})
 }

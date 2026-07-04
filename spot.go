@@ -10,9 +10,10 @@ import (
 type StreamType string
 
 const (
-	StreamDecoder      StreamType = "decoder"
-	StreamCWSkimmer    StreamType = "cwskimmer"
+	StreamDecoder       StreamType = "decoder"
+	StreamCWSkimmer     StreamType = "cwskimmer"
 	StreamVoiceActivity StreamType = "voice"
+	StreamDXCluster     StreamType = "dxcluster"
 )
 
 // Spot is the unified internal representation of any incoming event.
@@ -58,10 +59,16 @@ type Spot struct {
 //
 //	DX de MM9PSY-#:  14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
 //
-// The spotter always uses the receiver's callsign with "-#" suffix (skimmer convention).
+// For StreamDXCluster spots the original spotter callsign is used as-is.
+// For all other streams the receiver's callsign with "-#" suffix is used.
 func (s *Spot) FormatDXCluster(defaultSpotter string) string {
-	// Skimmer callsigns use "-#" suffix by convention
-	spotter := defaultSpotter + "-#"
+	var spotter string
+	if s.Stream == StreamDXCluster && s.Spotter != "" {
+		spotter = s.Spotter
+	} else {
+		// Skimmer callsigns use "-#" suffix by convention
+		spotter = defaultSpotter + "-#"
+	}
 
 	freqKHz := s.FreqHz / 1000.0
 
@@ -74,12 +81,11 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 		comment = fmt.Sprintf("%s %d dB", s.Mode, int(s.SNR))
 	case StreamCWSkimmer:
 		cwComment := s.Comment
-		if cwComment == "" {
-			cwComment = ""
-		}
 		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, cwComment)
 	case StreamVoiceActivity:
 		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
+	case StreamDXCluster:
+		comment = s.Comment
 	}
 
 	// Standard RBN/DX cluster format:
@@ -140,6 +146,45 @@ type voiceActivityEvent struct {
 	DXCountry       string  `json:"dx_country"`
 	DXCountryCode   string  `json:"dx_country_code"`
 	DXContinent     string  `json:"dx_continent"`
+}
+
+// dxSpotEvent is the raw JSON from /api/dxcluster/stream.
+type dxSpotEvent struct {
+	Type        string  `json:"type"`
+	Frequency   float64 `json:"frequency"`
+	DXCall      string  `json:"dx_call"`
+	Spotter     string  `json:"spotter"`
+	Band        string  `json:"band"`
+	Timestamp   string  `json:"timestamp"`
+	Comment     string  `json:"comment"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code"`
+	Continent   string  `json:"continent"`
+	TimeOffset  float64 `json:"time_offset"`
+}
+
+// parseDXSpot converts a raw DX cluster JSON data line into a Spot.
+func parseDXSpot(data []byte) (*Spot, error) {
+	var e dxSpotEvent
+	if err := json.Unmarshal(data, &e); err != nil {
+		return nil, err
+	}
+	if e.Type != "dx_spot" {
+		return nil, nil
+	}
+	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+	return &Spot{
+		Stream:      StreamDXCluster,
+		Timestamp:   ts,
+		Band:        e.Band,
+		Callsign:    e.DXCall,
+		FreqHz:      e.Frequency,
+		Spotter:     e.Spotter,
+		Comment:     e.Comment,
+		Country:     e.Country,
+		CountryCode: e.CountryCode,
+		Continent:   e.Continent,
+	}, nil
 }
 
 // parseDecoder converts a raw decoder JSON data line into a Spot.
