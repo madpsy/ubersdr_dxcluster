@@ -31,7 +31,8 @@ document.addEventListener('keydown', e => {
 });
 
 const BASE          = window.BASE_PATH || '';
-const MAX_ROWS      = 200;
+const MAX_ROWS      = 200;    // max rows per individual stream table
+const MAX_ROWS_ALL  = 2000;   // combined panel buffer (larger to absorb hidden filtered rows)
 const VOICE_EXPIRE  = 10 * 60 * 1000; // 10 minutes in ms
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -259,7 +260,7 @@ function onAllSpot(spot, live) {
   if (!rowMatchesFilter(tr)) tr.style.display = 'none';
 
   tbodyAll.insertBefore(tr, tbodyAll.firstChild);
-  trimTable(tbodyAll, MAX_ROWS);
+  trimTable(tbodyAll, MAX_ROWS_ALL);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
