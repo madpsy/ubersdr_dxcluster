@@ -96,10 +96,10 @@ type ClientState struct {
 func newClientState() *ClientState {
 	return &ClientState{
 		WantAll:       true,
-		WantDigital:   true,
+		WantDigital:   false, // disabled by default — user must enable with set/digital
 		WantRBN:       true,
 		WantVoice:     true,
-		WantDXCluster: true,
+		WantDXCluster: false, // disabled by default — user must enable with set/dxcluster
 	}
 }
 
@@ -297,7 +297,7 @@ SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/dx                        Enable ALL spots (DX Spider compat, default: on)
   unset/dx                      Disable ALL spots
 
-  set/digital                   Enable digital decoder spots (FT8/FT4/WSPR/JS8, default: on)
+  set/digital                   Enable digital decoder spots (FT8/FT4/WSPR/JS8, default: off)
   unset/digital                 Disable digital decoder spots
 
   set/rbn                       Enable CW/RBN skimmer spots (default: on)
@@ -308,7 +308,7 @@ SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/voice                     Enable voice activity spots (default: on)
   unset/voice                   Disable voice activity spots
 
-  set/dxcluster                 Enable DX cluster spots (default: on)
+  set/dxcluster                 Enable DX cluster spots (default: off)
   unset/dxcluster               Disable DX cluster spots
   set/cluster                   Alias for set/dxcluster
   unset/cluster                 Alias for unset/dxcluster

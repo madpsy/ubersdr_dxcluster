@@ -444,11 +444,12 @@ function onSnrMaxChange() {
 }
 
 function clearAllFilters() {
-  // Reset stream toggles
-  ['f-type-digital','f-type-cw','f-type-voice','f-type-dx'].forEach(id => {
+  // Reset stream toggles — digital and DX are off by default
+  const streamDefaults = { 'f-type-digital': false, 'f-type-cw': true, 'f-type-voice': true, 'f-type-dx': false };
+  for (const [id, def] of Object.entries(streamDefaults)) {
     const el = document.getElementById(id);
-    if (el) el.checked = true;
-  });
+    if (el) el.checked = def;
+  }
   // Reset mode checkboxes
   ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-cw','f-mode-usb','f-mode-lsb'].forEach(id => {
     const el = document.getElementById(id);
