@@ -322,6 +322,9 @@ td.muted-col   { color: var(--muted);  font-size: 10px; }
 .filter-checks.mode-grid {
   display: grid; grid-template-columns: repeat(3, auto); gap: 4px 12px;
 }
+.filter-checks.type-grid {
+  display: grid; grid-template-columns: repeat(2, auto); gap: 4px 12px;
+}
 .fcheck {
   display: flex; align-items: center; gap: 4px;
   cursor: pointer; font-size: 11px; color: var(--text);
