@@ -107,7 +107,13 @@ func (t *TelnetServer) handleConn(conn net.Conn) {
 
 	// ── Welcome + login prompt ─────────────────────────────────────────────
 	clientNum := int(t.clients.Load())
+	// Extract just the IP (strip port) for display — informational only.
+	clientIP := remote
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		clientIP = host
+	}
 	fmt.Fprintf(conn, "\r\nWelcome to %s UberSDR DX Cluster. You are client #%d.\r\n", t.spotterCall, clientNum)
+	fmt.Fprintf(conn, "Your IP   : %s\r\n", clientIP)
 	if t.rxName != "" {
 		fmt.Fprintf(conn, "Receiver  : %s\r\n", t.rxName)
 	}

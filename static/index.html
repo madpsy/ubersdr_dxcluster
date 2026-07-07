@@ -63,6 +63,7 @@
     <span class="val" id="hdr-telnet-port">—</span>
     <span class="lbl" style="margin-left:6px">Clients</span>
     <span class="val" id="hdr-telnet-clients">0</span>
+    <button id="term-open-btn" class="term-open-btn" title="Open web terminal" onclick="openTerminal()">&#x1F5A5;</button>
   </div>
   <div class="stat-pill"><span class="lbl">Total</span><span class="val" id="hdr-total">0</span></div>
   <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
@@ -323,6 +324,42 @@
 
 </div>
 
+<!-- ── Web Terminal Modal ──────────────────────────────────────────────── -->
+<div id="term-overlay" class="term-overlay" style="display:none">
+  <div id="term-modal" class="term-modal">
+
+    <!-- Header -->
+    <div class="term-hdr">
+      <span class="term-title">&#x1F5A5; Web Terminal</span>
+      <span id="term-status" class="term-status"></span>
+      <button id="term-close" class="term-close" title="Close">&#x2715;</button>
+    </div>
+
+    <!-- Login row (shown when not connected) -->
+    <div id="term-login-row" class="term-login-row">
+      <label class="term-call-label" for="term-callsign">Callsign:</label>
+      <input id="term-callsign" class="term-callsign-input" type="text"
+             maxlength="12" autocomplete="off" spellcheck="false"
+             placeholder="e.g. G1TLH">
+      <button id="term-connect" class="term-connect-btn">Connect</button>
+    </div>
+
+    <!-- Terminal output -->
+    <div id="term-output" class="term-output"></div>
+
+    <!-- Input row (shown when connected) -->
+    <div id="term-input-row" class="term-input-row" style="display:none">
+      <span class="term-prompt">&gt;</span>
+      <input id="term-input" class="term-input" type="text"
+             maxlength="512" autocomplete="off" spellcheck="false"
+             placeholder="Type a command and press Enter…">
+      <button id="term-send" class="term-send-btn">Send</button>
+    </div>
+
+  </div>
+</div>
+
 <script src="{{.BasePath}}/static/app.js"></script>
+<script src="{{.BasePath}}/static/terminal.js"></script>
 </body>
 </html>

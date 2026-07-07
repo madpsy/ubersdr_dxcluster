@@ -20,6 +20,7 @@ type WebServer struct {
 	addr       string
 	hub        *Hub
 	telnet     *TelnetServer
+	terminal   *TerminalProxy
 	rxCallsign string
 	rxName     string
 	rxLocation string
@@ -50,6 +51,7 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		addr:       addr,
 		hub:        hub,
 		telnet:     telnet,
+		terminal:   NewTerminalProxy(),
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
@@ -82,6 +84,9 @@ func (w *WebServer) ListenAndServe() error {
 
 	// SSE relay
 	mux.HandleFunc("/api/events", w.handleEvents)
+
+	// WebSocket terminal proxy (bidirectional telnet-over-WebSocket)
+	mux.Handle("/api/terminal", w.terminal)
 
 	// REST history endpoints
 	mux.HandleFunc("/api/spots", w.handleSpots)
