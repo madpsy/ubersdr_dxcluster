@@ -21,6 +21,13 @@ services:
       # Set to "false" to allow anonymous connections
       # REQUIRE_LOGIN: "true"
       #
+      # Directory for persistent data (SQLite spot database)
+      # DATA_DIR: "/data"
+      #
+      # Days of spot history to retain in the database (default: 30)
+      # Older spots are purged daily and the DB file is shrunk on disk.
+      # RETENTION_DAYS: "30"
+      #
       # Note: reverse-proxy base path is read automatically from
       # the X-Forwarded-Prefix header — no configuration needed.
     ports:

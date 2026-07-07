@@ -2,10 +2,10 @@
 # ---------------------------------------------------------------------------
 # Stage 1: build ubersdr_dxcluster Go binary
 # ---------------------------------------------------------------------------
-FROM golang:1.24-bookworm AS go-builder
+FROM golang:1.25-bookworm AS go-builder
 
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .

@@ -2,30 +2,34 @@ package main
 
 import "sync"
 
-const ringSize = 500 // max spots kept in history per stream
+const ringSize = 500 // max spots kept in the in-memory history ring (web UI initial load)
 
 // Hub fans out incoming Spots to all registered subscribers.
 // A single goroutine owns the subscriber map — no mutex needed for the map itself.
 // The ring buffer is protected by a RWMutex for concurrent REST reads.
+// An optional SpotStore receives every spot for persistent storage.
 type Hub struct {
-	in   chan Spot
-	sub  chan subReq
+	in    chan Spot
+	sub   chan subReq
 	unsub chan chan Spot
 
 	mu   sync.RWMutex
 	ring []Spot // circular history, newest-first
+
+	store *SpotStore // optional; nil if persistence is disabled
 }
 
 type subReq struct {
 	ch chan Spot
 }
 
-func NewHub() *Hub {
+func NewHub(store *SpotStore) *Hub {
 	return &Hub{
 		in:    make(chan Spot, 256),
 		sub:   make(chan subReq, 16),
 		unsub: make(chan chan Spot, 16),
 		ring:  make([]Spot, 0, ringSize),
+		store: store,
 	}
 }
 
@@ -79,6 +83,11 @@ func (h *Hub) Run() {
 				h.ring = h.ring[:ringSize]
 			}
 			h.mu.Unlock()
+
+			// Persist to store if configured
+			if h.store != nil {
+				h.store.Publish(s)
+			}
 
 			// Fan out to all subscribers
 			for ch := range subs {

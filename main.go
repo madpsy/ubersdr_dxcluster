@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,10 @@ type descriptionResponse struct {
 		Callsign string `json:"callsign"`
 		Name     string `json:"name"`
 		Location string `json:"location"`
+		GPS      struct {
+			Lat float64 `json:"lat"`
+			Lon float64 `json:"lon"`
+		} `json:"gps"`
 	} `json:"receiver"`
 }
 
@@ -68,10 +73,11 @@ func fetchCountries(baseURL string) []CountryEntry {
 }
 
 // fetchDescription calls /api/description on the UberSDR instance and returns
-// the receiver callsign, name, and location. Falls back to defaults on error.
-func fetchDescription(baseURL string) (callsign, name, location string) {
+// the receiver callsign, name, location, and GPS coordinates.
+// Falls back to defaults on error.
+func fetchDescription(baseURL string) (callsign, name, location string, lat, lon float64) {
 	callsign = "UBERSDR"
-	name     = "UberSDR DX Cluster"
+	name = "UberSDR DX Cluster"
 	location = ""
 
 	url := strings.TrimRight(baseURL, "/") + "/api/description"
@@ -96,22 +102,60 @@ func fetchDescription(baseURL string) (callsign, name, location string) {
 		name = d.Receiver.Name
 	}
 	location = d.Receiver.Location
+	lat = d.Receiver.GPS.Lat
+	lon = d.Receiver.GPS.Lon
 	return
 }
 
 func main() {
-	ubersdrURL    := flag.String("url",           "http://ubersdr:8080", "Base URL of UberSDR instance")
-	webListen     := flag.String("listen",        ":6087",               "Web UI listen address")
-	telnetListen  := flag.String("telnet",        ":7300",               "DX cluster telnet listen address")
-	spotterCall   := flag.String("spotter",       "",                    "Callsign shown as spotter (default: fetched from /api/description)")
-	requireLogin  := flag.Bool("require-login",   true,                  "Require a valid callsign login on telnet connect (default: true)")
+	ubersdrURL := flag.String("url", "http://ubersdr:8080", "Base URL of UberSDR instance")
+	webListen := flag.String("listen", ":6087", "Web UI listen address")
+	telnetListen := flag.String("telnet", ":7300", "DX cluster telnet listen address")
+	spotterCall := flag.String("spotter", "", "Callsign shown as spotter (default: fetched from /api/description)")
+	requireLogin := flag.Bool("require-login", true, "Require a valid callsign login on telnet connect (default: true)")
+	dataDir := flag.String("data-dir", "", "Directory for persistent data (SQLite DB). Defaults to DATA_DIR env var or /data")
+	retentionDays := flag.Int("retention-days", 0, "Days of spot history to retain. Defaults to RETENTION_DAYS env var or 30")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[dxcluster] ")
 
+	// Resolve data directory: flag > env > default
+	dir := *dataDir
+	if dir == "" {
+		dir = os.Getenv("DATA_DIR")
+	}
+	if dir == "" {
+		dir = "/data"
+	}
+
+	// Resolve retention days: flag > env > default (30)
+	retain := *retentionDays
+	if retain == 0 {
+		if v := os.Getenv("RETENTION_DAYS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				retain = n
+			} else {
+				log.Printf("invalid RETENTION_DAYS=%q — using default 30", v)
+			}
+		}
+	}
+	if retain <= 0 {
+		retain = 30
+	}
+
+	// Open persistent spot store
+	dbPath := dir + "/spots.db"
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		log.Fatalf("open spot store %s: %v", dbPath, err)
+	}
+	go store.Run()
+	go store.RunPurge(retain)
+	log.Printf("  store    : %s (%d spots, %d-day retention)", dbPath, store.Count(), retain)
+
 	// Fetch receiver info from UberSDR
-	callsign, rxName, rxLocation := fetchDescription(*ubersdrURL)
+	callsign, rxName, rxLocation, rxLat, rxLon := fetchDescription(*ubersdrURL)
 	if *spotterCall != "" {
 		callsign = *spotterCall
 	}
@@ -121,9 +165,9 @@ func main() {
 	log.Printf("  web      : %s", *webListen)
 	log.Printf("  telnet   : %s", *telnetListen)
 	log.Printf("  spotter  : %s", callsign)
-	log.Printf("  receiver : %s — %s", rxName, rxLocation)
+	log.Printf("  receiver : %s — %s (%.4f, %.4f)", rxName, rxLocation, rxLat, rxLon)
 
-	hub := NewHub()
+	hub := NewHub(store)
 	go hub.Run()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -133,11 +177,13 @@ func main() {
 	StartConsumers(ctx, *ubersdrURL, hub)
 
 	// Start telnet DX cluster server
-	telnet := NewTelnetServer(*telnetListen, hub, callsign, ReceiverInfo{
+	telnet := NewTelnetServer(*telnetListen, hub, store, callsign, ReceiverInfo{
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,
-	}, *requireLogin)
+		Lat:      rxLat,
+		Lon:      rxLon,
+	}, *ubersdrURL, *requireLogin)
 	go func() {
 		if err := telnet.ListenAndServe(); err != nil {
 			log.Fatalf("telnet server: %v", err)

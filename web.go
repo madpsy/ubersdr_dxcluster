@@ -17,15 +17,15 @@ var staticFiles embed.FS
 
 // WebServer serves the web UI and SSE relay endpoint.
 type WebServer struct {
-	addr        string
-	hub         *Hub
-	telnet      *TelnetServer
-	rxCallsign  string
-	rxName      string
-	rxLocation  string
-	telnetAddr  string
-	countries   []CountryEntry
-	tmpl        *template.Template
+	addr       string
+	hub        *Hub
+	telnet     *TelnetServer
+	rxCallsign string
+	rxName     string
+	rxLocation string
+	telnetAddr string
+	countries  []CountryEntry
+	tmpl       *template.Template
 }
 
 // ReceiverInfo holds static data fetched from /api/description at startup.
@@ -33,6 +33,8 @@ type ReceiverInfo struct {
 	Callsign string
 	Name     string
 	Location string
+	Lat      float64
+	Lon      float64
 }
 
 func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub) (*WebServer, error) {
