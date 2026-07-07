@@ -144,11 +144,27 @@ func main() {
 		retain = 30
 	}
 
+	// Resolve voice dedup window: VOICE_DEDUP_MINS env var > default (10)
+	voiceDedupMins := 10
+	if v := os.Getenv("VOICE_DEDUP_MINS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			voiceDedupMins = n
+		} else {
+			log.Printf("invalid VOICE_DEDUP_MINS=%q — using default 10", v)
+		}
+	}
+
 	// Open persistent spot store
 	dbPath := dir + "/spots.db"
 	store, err := OpenStore(dbPath)
 	if err != nil {
 		log.Fatalf("open spot store %s: %v", dbPath, err)
+	}
+	if voiceDedupMins > 0 {
+		store.SetVoiceDedupWindow(time.Duration(voiceDedupMins) * time.Minute)
+		log.Printf("  voice dedup: %d min window", voiceDedupMins)
+	} else {
+		log.Printf("  voice dedup: disabled")
 	}
 	go store.Run()
 	go store.RunPurge(retain)

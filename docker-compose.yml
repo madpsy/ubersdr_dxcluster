@@ -28,6 +28,11 @@ services:
       # Older spots are purged daily and the DB file is shrunk on disk.
       # RETENTION_DAYS: "30"
       #
+      # Voice spot dedup window in minutes (default: 10, set to 0 to disable)
+      # Prevents the same voice signal (callsign+freq+mode) being stored more
+      # than once per window. Real-time streaming is unaffected.
+      # VOICE_DEDUP_MINS: "10"
+      #
       # Note: reverse-proxy base path is read automatically from
       # the X-Forwarded-Prefix header — no configuration needed.
     ports:

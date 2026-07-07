@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -78,6 +79,12 @@ INSERT INTO spots (
 type SpotStore struct {
 	db *sql.DB
 	in chan Spot
+
+	// Voice spot dedup: skip inserting a voice spot if the same
+	// (callsign, freq kHz, voice_mode) was seen within voiceDedupWindow.
+	voiceDedupWindow time.Duration
+	voiceDedupMu     sync.Mutex
+	voiceDedup       map[string]time.Time // key → last-seen time
 }
 
 // OpenStore opens (or creates) the SQLite database at path, applies the
@@ -127,14 +134,52 @@ func OpenStore(path string) (*SpotStore, error) {
 	}
 
 	s := &SpotStore{
-		db: db,
-		in: make(chan Spot, 4096),
+		db:         db,
+		in:         make(chan Spot, 4096),
+		voiceDedup: make(map[string]time.Time),
 	}
 	return s, nil
 }
 
+// SetVoiceDedupWindow configures the dedup window for voice spots.
+// A zero or negative value disables dedup entirely.
+func (s *SpotStore) SetVoiceDedupWindow(d time.Duration) {
+	s.voiceDedupWindow = d
+}
+
+// voiceDedupKey returns the dedup key for a voice spot:
+// "callsign|freqKHz|mode". Frequency is rounded to the nearest kHz to
+// absorb small drift without creating false "new" entries.
+func voiceDedupKey(sp Spot) string {
+	freqKHz := int64(sp.FreqHz/1000 + 0.5)
+	return fmt.Sprintf("%s|%d|%s", sp.Callsign, freqKHz, sp.VoiceMode)
+}
+
 // Publish queues a spot for async insertion. Non-blocking — drops if full.
+// Voice spots are deduplicated: if the same (callsign, freq, mode) was seen
+// within voiceDedupWindow, the spot is silently dropped from the DB write
+// path (real-time streaming via the hub ring buffer is unaffected).
 func (s *SpotStore) Publish(spot Spot) {
+	if spot.Stream == StreamVoiceActivity && s.voiceDedupWindow > 0 {
+		key := voiceDedupKey(spot)
+		now := time.Now()
+
+		s.voiceDedupMu.Lock()
+		last, seen := s.voiceDedup[key]
+		if seen && now.Sub(last) < s.voiceDedupWindow {
+			s.voiceDedupMu.Unlock()
+			return // duplicate within window — skip DB insert
+		}
+		s.voiceDedup[key] = now
+		// Lazy sweep: remove entries older than the window to bound map size.
+		for k, t := range s.voiceDedup {
+			if now.Sub(t) >= s.voiceDedupWindow {
+				delete(s.voiceDedup, k)
+			}
+		}
+		s.voiceDedupMu.Unlock()
+	}
+
 	select {
 	case s.in <- spot:
 	default:
