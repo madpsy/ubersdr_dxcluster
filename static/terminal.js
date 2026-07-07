@@ -150,15 +150,15 @@
   // ── Modal ──────────────────────────────────────────────────────────────────
 
   function openModal() {
-    if (modal) {
-      modal.style.display = 'flex';
+    if (overlay) {
+      overlay.style.display = 'flex';
       if (!connected && callsignInput) callsignInput.focus();
       else if (connected && input) input.focus();
     }
   }
 
   function closeModal() {
-    if (modal) modal.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
     // Keep the connection alive when the modal is closed
   }
 
