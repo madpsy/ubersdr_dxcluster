@@ -78,30 +78,30 @@ func TestHandleClientDownload(t *testing.T) {
 
 	// Explicit os override.
 	check("os=windows", httptest.NewRequest(http.MethodGet, "/client/download?os=windows", nil),
-		"win", "ubersdr_m9psy.exe")
+		"win", "dxcluster_m9psy.exe")
 	check("os=linux", httptest.NewRequest(http.MethodGet, "/client/download?os=linux", nil),
-		"lin", "ubersdr_m9psy")
+		"lin", "dxcluster_m9psy")
 
 	// Sec-CH-UA-Platform client hint.
 	rq := httptest.NewRequest(http.MethodGet, "/client/download", nil)
 	rq.Header.Set("Sec-CH-UA-Platform", `"Windows"`)
-	check("hint Windows", rq, "win", "ubersdr_m9psy.exe")
+	check("hint Windows", rq, "win", "dxcluster_m9psy.exe")
 
 	// User-Agent fallback (Windows).
 	rq = httptest.NewRequest(http.MethodGet, "/client/download", nil)
 	rq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	check("ua Windows", rq, "win", "ubersdr_m9psy.exe")
+	check("ua Windows", rq, "win", "dxcluster_m9psy.exe")
 
 	// User-Agent fallback (Linux → linux build).
 	rq = httptest.NewRequest(http.MethodGet, "/client/download", nil)
 	rq.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
-	check("ua Linux", rq, "lin", "ubersdr_m9psy")
+	check("ua Linux", rq, "lin", "dxcluster_m9psy")
 
 	// Empty callsign falls back to a generic name.
 	w2 := &WebServer{rxCallsign: ""}
 	rec := httptest.NewRecorder()
 	w2.handleClientDownload(rec, httptest.NewRequest(http.MethodGet, "/client/download?os=linux", nil))
-	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="ubersdr_client"` {
+	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="dxcluster_client"` {
 		t.Fatalf("empty callsign disposition = %q", got)
 	}
 }

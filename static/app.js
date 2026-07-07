@@ -26,8 +26,24 @@ function closeHelpModal() {
   if (overlay) overlay.classList.remove('open');
 }
 
+// ── Client download info modal ──────────────────────────────────────────────
+// Shown when the "Download Client" button is clicked; the download itself is
+// triggered by the anchor's href (this does not preventDefault).
+function showClientInfo() {
+  const overlay = document.getElementById('client-info-overlay');
+  if (overlay) overlay.classList.add('open');
+}
+
+function closeClientInfo() {
+  const overlay = document.getElementById('client-info-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeHelpModal();
+  if (e.key === 'Escape') {
+    closeHelpModal();
+    closeClientInfo();
+  }
 });
 
 const BASE          = window.BASE_PATH || '';

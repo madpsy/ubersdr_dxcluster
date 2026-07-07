@@ -252,7 +252,7 @@ func (w *WebServer) handleClients(rw http.ResponseWriter, r *http.Request) {
 }
 
 // handleClientDownload serves the desktop client for the requesting OS, named
-// after this instance's callsign, e.g. ubersdr_m9psy or ubersdr_m9psy.exe.
+// after this instance's callsign, e.g. dxcluster_m9psy or dxcluster_m9psy.exe.
 // The downloaded name is what the client parses at startup to auto-target this
 // instance's callsign.
 func (w *WebServer) handleClientDownload(rw http.ResponseWriter, r *http.Request) {
@@ -265,7 +265,7 @@ func (w *WebServer) handleClientDownload(rw http.ResponseWriter, r *http.Request
 	if call == "" {
 		call = "client"
 	}
-	w.serveClientFile(rw, r, srcFile, "ubersdr_"+call+ext)
+	w.serveClientFile(rw, r, srcFile, "dxcluster_"+call+ext)
 }
 
 // detectClientOS returns "windows" or "linux" for the requesting browser.

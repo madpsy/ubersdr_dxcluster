@@ -29,6 +29,28 @@
   </div>
 </div>
 
+<!-- Client download info modal -->
+<div id="client-info-overlay" onclick="if(event.target===this)closeClientInfo()">
+  <div id="client-info-modal">
+    <div id="client-info-hdr">
+      <span>📡</span> Desktop DX Cluster Client
+      <button id="client-info-close" onclick="closeClientInfo()">×</button>
+    </div>
+    <div id="client-info-body">
+      <p>Your download should be starting…</p>
+      <p>When you run the client it connects to this DX Cluster and listens on
+         <strong>port 7300</strong> on your local machine.</p>
+      <p>You can then connect to <code>localhost:7300</code> with
+         <strong>telnet</strong> or your favourite logging software to receive
+         the live spot stream. Other machines on your local network can also
+         connect to it, using the host machine's IP address on port 7300, if
+         your firewall allows.</p>
+      <p>The client can also connect to any other UberSDR instance that has the
+         DX Cluster add-on enabled.</p>
+    </div>
+  </div>
+</div>
+
 <header>
   <div class="logo">
     <span class="logo-icon">📡</span>
@@ -70,12 +92,6 @@
   <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
   <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
   <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
-  <div class="stat-pill" title="Download the desktop DX Cluster client (auto-detects your OS)">
-    <span class="lbl">Client</span>
-    <a class="val" href="{{.BasePath}}/client/download" style="text-decoration:underline;cursor:pointer">Download</a>
-    <a class="val" href="{{.BasePath}}/client/download?os=linux" style="text-decoration:underline;cursor:pointer" title="Linux build">Linux</a>
-    <a class="val" href="{{.BasePath}}/client/download?os=windows" style="text-decoration:underline;cursor:pointer" title="Windows build">Windows</a>
-  </div>
   <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 </header>
 
@@ -333,6 +349,7 @@
 <!-- Centered desktop client download (auto-detects the visitor's OS) -->
 <div class="download-footer">
   <a class="download-client-btn" href="{{.BasePath}}/client/download"
+     onclick="showClientInfo()"
      title="Download the desktop DX Cluster client for your operating system">
     ⬇️ Download Client
   </a>
