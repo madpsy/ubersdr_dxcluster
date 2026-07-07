@@ -51,7 +51,7 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		addr:       addr,
 		hub:        hub,
 		telnet:     telnet,
-		terminal:   NewTerminalProxy(),
+		terminal:   NewTerminalProxy(telnet),
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,

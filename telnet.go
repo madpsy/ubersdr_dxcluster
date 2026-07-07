@@ -87,14 +87,17 @@ func (t *TelnetServer) ListenAndServe() error {
 			log.Printf("[telnet] accept error: %v", err)
 			continue
 		}
-		go t.handleConn(conn)
+		go t.handleConn(conn, conn.RemoteAddr().String())
 	}
 }
 
 // ── Connection handler ─────────────────────────────────────────────────────
 
-func (t *TelnetServer) handleConn(conn net.Conn) {
-	remote := conn.RemoteAddr().String()
+// handleConn handles a single telnet client connection.
+// remoteAddr is the client's address string — passed explicitly so that the
+// WebSocket proxy can supply the real browser IP rather than 127.0.0.1.
+func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
+	remote := remoteAddr
 	t.clients.Add(1)
 	log.Printf("[telnet] client connected: %s (total: %d)", remote, t.clients.Load())
 	defer func() {
