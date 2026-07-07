@@ -16,13 +16,13 @@ import (
 // ── Security constants ─────────────────────────────────────────────────────
 
 const (
-	// terminalMaxConns is the maximum number of simultaneous WebSocket
-	// terminal sessions. Prevents connection-flood DoS.
-	terminalMaxConns = 10
-
 	// terminalMaxMsgBytes is the maximum size of a single WebSocket message
 	// from the browser (i.e. a single command line). 4 KB is generous.
 	terminalMaxMsgBytes = 4 * 1024
+
+	// Default limits — overridden by WS_MAX_CONNS / WS_MAX_CONNS_PER_IP env vars.
+	defaultTerminalMaxConns      = 25
+	defaultTerminalMaxConnsPerIP = 2
 )
 
 // ── wsConn — net.Conn adapter for a WebSocket connection ──────────────────
@@ -109,13 +109,43 @@ func (a *wsAddr) String() string  { return a.addr }
 // TelnetServer.handleConn directly — no TCP round-trip to localhost:7300.
 // This means the real browser IP is passed through correctly.
 type TerminalProxy struct {
-	telnet *TelnetServer
-	conns  atomic.Int32
+	telnet        *TelnetServer
+	maxConns      int32 // global cap (WS_MAX_CONNS)
+	maxConnsPerIP int   // per-IP cap (WS_MAX_CONNS_PER_IP)
+	conns         atomic.Int32
+
+	// per-IP connection tracking
+	ipMu    sync.Mutex
+	ipConns map[string]int // bare IP → active WebSocket session count
 }
 
 // NewTerminalProxy creates a TerminalProxy that calls into the given TelnetServer.
-func NewTerminalProxy(telnet *TelnetServer) *TerminalProxy {
-	return &TerminalProxy{telnet: telnet}
+// maxConns is the global session cap; maxConnsPerIP is the per-IP cap.
+func NewTerminalProxy(telnet *TelnetServer, maxConns, maxConnsPerIP int) *TerminalProxy {
+	return &TerminalProxy{
+		telnet:        telnet,
+		maxConns:      int32(maxConns),
+		maxConnsPerIP: maxConnsPerIP,
+		ipConns:       make(map[string]int),
+	}
+}
+
+// ipAdd increments the per-IP counter and returns the new count.
+func (tp *TerminalProxy) ipAdd(ip string) int {
+	tp.ipMu.Lock()
+	defer tp.ipMu.Unlock()
+	tp.ipConns[ip]++
+	return tp.ipConns[ip]
+}
+
+// ipRemove decrements the per-IP counter, removing the key when it reaches zero.
+func (tp *TerminalProxy) ipRemove(ip string) {
+	tp.ipMu.Lock()
+	defer tp.ipMu.Unlock()
+	tp.ipConns[ip]--
+	if tp.ipConns[ip] <= 0 {
+		delete(tp.ipConns, ip)
+	}
 }
 
 // ServeHTTP upgrades the HTTP connection to WebSocket and runs a full telnet
@@ -127,8 +157,8 @@ func NewTerminalProxy(telnet *TelnetServer) *TerminalProxy {
 //   - Message size limit: terminalMaxMsgBytes per browser message.
 //   - Real IP: extracted from X-Real-IP / X-Forwarded-For / RemoteAddr.
 func (tp *TerminalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// ── 1. Connection limit ────────────────────────────────────────────────
-	if tp.conns.Load() >= terminalMaxConns {
+	// ── 1. Global connection limit ─────────────────────────────────────────
+	if tp.conns.Load() >= tp.maxConns {
 		http.Error(w, "too many terminal sessions", http.StatusServiceUnavailable)
 		return
 	}
@@ -140,7 +170,18 @@ func (tp *TerminalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// For direct connections, r.RemoteAddr is authoritative.
 	realIP := realClientIP(r)
 
-	// ── 3. WebSocket upgrade (same-origin only) ────────────────────────────
+	// ── 3. Per-IP connection limit ─────────────────────────────────────────
+	// Check before upgrading so we can return a plain HTTP 429.
+	tp.ipMu.Lock()
+	currentForIP := tp.ipConns[realIP]
+	tp.ipMu.Unlock()
+	if currentForIP >= tp.maxConnsPerIP {
+		log.Printf("[terminal] per-IP limit reached for %s (%d sessions)", realIP, currentForIP)
+		http.Error(w, "too many terminal sessions from your IP", http.StatusTooManyRequests)
+		return
+	}
+
+	// ── 4. WebSocket upgrade (same-origin only) ────────────────────────────
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: false, // enforce same-origin check
 	})
@@ -153,7 +194,11 @@ func (tp *TerminalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tp.conns.Add(1)
 	defer tp.conns.Add(-1)
 
-	// ── 4. Run telnet session directly (no TCP round-trip) ─────────────────
+	// Register per-IP session; deregister on exit.
+	tp.ipAdd(realIP)
+	defer tp.ipRemove(realIP)
+
+	// ── 5. Run telnet session directly (no TCP round-trip) ─────────────────
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 

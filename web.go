@@ -38,7 +38,7 @@ type ReceiverInfo struct {
 	Lon      float64
 }
 
-func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub) (*WebServer, error) {
+func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {
 	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read index.html: %w", err)
@@ -51,7 +51,7 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		addr:       addr,
 		hub:        hub,
 		telnet:     telnet,
-		terminal:   NewTerminalProxy(telnet),
+		terminal:   NewTerminalProxy(telnet, wsMaxConns, wsMaxConnsPerIP),
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
@@ -201,15 +201,21 @@ func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Access-Control-Allow-Origin", "*")
 
 	telnetClients := 0
+	var clients []clientEntry
 	if w.telnet != nil {
 		telnetClients = w.telnet.ClientCount()
+		clients = w.telnet.ConnectedClients()
+	}
+	if clients == nil {
+		clients = []clientEntry{}
 	}
 
 	_ = json.NewEncoder(rw).Encode(map[string]interface{}{
-		"status":         "ok",
-		"ts":             time.Now().UTC().Format(time.RFC3339),
-		"telnet_addr":    w.telnetAddr,
-		"telnet_clients": telnetClients,
+		"status":             "ok",
+		"ts":                 time.Now().UTC().Format(time.RFC3339),
+		"telnet_addr":        w.telnetAddr,
+		"telnet_clients":     telnetClients,
+		"telnet_client_list": clients,
 		"streams": []string{
 			string(StreamDecoder),
 			string(StreamCWSkimmer),

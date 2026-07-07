@@ -12,6 +12,8 @@
 
   // ── State ──────────────────────────────────────────────────────────────────
 
+  const SCROLLBACK_LIMIT = 2000; // max <span> children in the output div
+
   let ws = null;
   let connected = false;
   let callsignSent = false;
@@ -19,8 +21,8 @@
 
   // ── DOM references (populated in init) ────────────────────────────────────
 
-  let modal, overlay, output, input, sendBtn, connectBtn, callsignInput,
-      loginRow, inputRow, statusEl, closeBtn;
+  let modal, overlay, output, input, sendBtn, connectBtn, disconnectBtn,
+      callsignInput, loginRow, inputRow, statusEl, closeBtn, termOpenBtn;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,10 @@
     const span = document.createElement('span');
     span.textContent = text;
     output.appendChild(span);
+    // Trim oldest lines to stay within scrollback limit
+    while (output.childNodes.length > SCROLLBACK_LIMIT) {
+      output.removeChild(output.firstChild);
+    }
     // Auto-scroll to bottom
     output.scrollTop = output.scrollHeight;
   }
@@ -45,12 +51,13 @@
 
   function setConnected(state) {
     connected = state;
-    if (inputRow) inputRow.style.display = state ? 'flex' : 'none';
-    if (loginRow) loginRow.style.display = state ? 'none' : 'flex';
-    if (connectBtn) connectBtn.disabled = state;
-    if (input) {
-      if (state) input.focus();
-    }
+    if (inputRow)      inputRow.style.display      = state ? 'flex'  : 'none';
+    if (loginRow)      loginRow.style.display      = state ? 'none'  : 'flex';
+    if (connectBtn)    connectBtn.disabled          = state;
+    if (disconnectBtn) disconnectBtn.style.display  = state ? ''      : 'none';
+    // Toggle the header button's active (green) state
+    if (termOpenBtn) termOpenBtn.classList.toggle('active', state);
+    if (input && state) input.focus();
   }
 
   // ── WebSocket URL ──────────────────────────────────────────────────────────
@@ -152,6 +159,8 @@
   function openModal() {
     if (overlay) {
       overlay.style.display = 'flex';
+      // Scroll output to bottom so the latest content is visible on re-open
+      if (output) output.scrollTop = output.scrollHeight;
       if (!connected && callsignInput) callsignInput.focus();
       else if (connected && input) input.focus();
     }
@@ -159,23 +168,26 @@
 
   function closeModal() {
     if (overlay) overlay.style.display = 'none';
-    // Keep the connection alive when the modal is closed
+    // Disconnect the session when the modal is closed
+    disconnect();
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
 
   function init() {
-    modal       = document.getElementById('term-modal');
-    overlay     = document.getElementById('term-overlay');
-    output      = document.getElementById('term-output');
-    input       = document.getElementById('term-input');
-    sendBtn     = document.getElementById('term-send');
-    connectBtn  = document.getElementById('term-connect');
+    modal         = document.getElementById('term-modal');
+    overlay       = document.getElementById('term-overlay');
+    output        = document.getElementById('term-output');
+    input         = document.getElementById('term-input');
+    sendBtn       = document.getElementById('term-send');
+    connectBtn    = document.getElementById('term-connect');
+    disconnectBtn = document.getElementById('term-disconnect');
     callsignInput = document.getElementById('term-callsign');
-    loginRow    = document.getElementById('term-login-row');
-    inputRow    = document.getElementById('term-input-row');
-    statusEl    = document.getElementById('term-status');
-    closeBtn    = document.getElementById('term-close');
+    loginRow      = document.getElementById('term-login-row');
+    inputRow      = document.getElementById('term-input-row');
+    statusEl      = document.getElementById('term-status');
+    closeBtn      = document.getElementById('term-close');
+    termOpenBtn   = document.getElementById('term-open-btn');
 
     if (!modal) return; // terminal HTML not present
 
@@ -189,8 +201,9 @@
     // Close button
     if (closeBtn) closeBtn.addEventListener('click', closeModal);
 
-    // Connect button
-    if (connectBtn) connectBtn.addEventListener('click', connect);
+    // Connect / Disconnect buttons
+    if (connectBtn)    connectBtn.addEventListener('click', connect);
+    if (disconnectBtn) disconnectBtn.addEventListener('click', disconnect);
 
     // Callsign input: Enter to connect
     if (callsignInput) {

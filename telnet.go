@@ -7,9 +7,16 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// clientEntry holds per-connection tracking data for the status tooltip.
+type clientEntry struct {
+	MaskedIP string `json:"ip"`
+	Callsign string `json:"callsign"` // empty until login completes
+}
 
 // callsignRe is the DX Spider is_callsign() regex translated to Go.
 // Matches valid amateur callsigns including portable/mobile suffixes and SSIDs.
@@ -49,6 +56,11 @@ type TelnetServer struct {
 	version      string
 	requireLogin bool
 	startTime    time.Time
+
+	// connected client tracking (one entry per active connection)
+	clientsMu  sync.RWMutex
+	clientMap  map[uint64]*clientEntry // connID → entry
+	nextConnID atomic.Uint64
 }
 
 func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string, rx ReceiverInfo, ubersdrURL string, requireLogin bool) *TelnetServer {
@@ -65,12 +77,76 @@ func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string
 		version:      "ubersdr_dxcluster/1.0",
 		requireLogin: requireLogin,
 		startTime:    time.Now(),
+		clientMap:    make(map[uint64]*clientEntry),
 	}
 }
 
 // ClientCount returns the number of currently connected telnet clients.
 func (t *TelnetServer) ClientCount() int {
 	return int(t.clients.Load())
+}
+
+// ConnectedClients returns a snapshot of all currently connected clients.
+func (t *TelnetServer) ConnectedClients() []clientEntry {
+	t.clientsMu.RLock()
+	defer t.clientsMu.RUnlock()
+	out := make([]clientEntry, 0, len(t.clientMap))
+	for _, e := range t.clientMap {
+		out = append(out, *e)
+	}
+	return out
+}
+
+// maskIP replaces the identifying octets of an IP with "xxx" for privacy.
+// IPv4 a.b.c.d  → xxx.xxx.c.d
+// IPv6           → xxxx:xxxx:…:last (all groups but last two replaced)
+func maskIP(ip string) string {
+	// Try IPv4
+	parts := strings.Split(ip, ".")
+	if len(parts) == 4 {
+		return "xxx.xxx." + parts[2] + "." + parts[3]
+	}
+	// IPv6 — expand and mask all but last two groups
+	groups := strings.Split(ip, ":")
+	if len(groups) >= 2 {
+		masked := make([]string, len(groups))
+		for i := range groups {
+			if i < len(groups)-2 {
+				masked[i] = "xxxx"
+			} else {
+				masked[i] = groups[i]
+			}
+		}
+		return strings.Join(masked, ":")
+	}
+	// Fallback: return as-is
+	return ip
+}
+
+// registerConn adds a new connection entry and returns its unique ID.
+func (t *TelnetServer) registerConn(ip string) uint64 {
+	id := t.nextConnID.Add(1)
+	entry := &clientEntry{MaskedIP: maskIP(ip)}
+	t.clientsMu.Lock()
+	t.clientMap[id] = entry
+	t.clientsMu.Unlock()
+	return id
+}
+
+// setConnCallsign updates the callsign for a connection after login.
+func (t *TelnetServer) setConnCallsign(id uint64, callsign string) {
+	t.clientsMu.Lock()
+	if e, ok := t.clientMap[id]; ok {
+		e.Callsign = callsign
+	}
+	t.clientsMu.Unlock()
+}
+
+// unregisterConn removes a connection entry.
+func (t *TelnetServer) unregisterConn(id uint64) {
+	t.clientsMu.Lock()
+	delete(t.clientMap, id)
+	t.clientsMu.Unlock()
 }
 
 // ListenAndServe starts the telnet listener. Blocks until the listener fails.
@@ -99,9 +175,18 @@ func (t *TelnetServer) ListenAndServe() error {
 func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 	remote := remoteAddr
 	t.clients.Add(1)
+
+	// Extract bare IP for tracking (strip port if present)
+	clientIP := remote
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		clientIP = host
+	}
+	connID := t.registerConn(clientIP)
+
 	log.Printf("[telnet] client connected: %s (total: %d)", remote, t.clients.Load())
 	defer func() {
 		t.clients.Add(-1)
+		t.unregisterConn(connID)
 		conn.Close()
 		log.Printf("[telnet] client disconnected: %s (total: %d)", remote, t.clients.Load())
 	}()
@@ -110,11 +195,6 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 
 	// ── Welcome + login prompt ─────────────────────────────────────────────
 	clientNum := int(t.clients.Load())
-	// Extract just the IP (strip port) for display — informational only.
-	clientIP := remote
-	if host, _, err := net.SplitHostPort(remote); err == nil {
-		clientIP = host
-	}
 	fmt.Fprintf(conn, "\r\nWelcome to %s UberSDR DX Cluster. You are client #%d.\r\n", t.spotterCall, clientNum)
 	fmt.Fprintf(conn, "Your IP   : %s\r\n", clientIP)
 	if t.rxName != "" {
@@ -139,6 +219,7 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 			return
 		}
 		state.Name = call
+		t.setConnCallsign(connID, call)
 		log.Printf("[telnet] login: %s from %s", call, remote)
 	}
 

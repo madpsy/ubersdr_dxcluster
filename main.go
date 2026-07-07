@@ -154,6 +154,24 @@ func main() {
 		}
 	}
 
+	// Resolve WebSocket terminal limits: WS_MAX_CONNS / WS_MAX_CONNS_PER_IP env vars
+	wsMaxConns := 25
+	if v := os.Getenv("WS_MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			wsMaxConns = n
+		} else {
+			log.Printf("invalid WS_MAX_CONNS=%q — using default 25", v)
+		}
+	}
+	wsMaxConnsPerIP := 2
+	if v := os.Getenv("WS_MAX_CONNS_PER_IP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			wsMaxConnsPerIP = n
+		} else {
+			log.Printf("invalid WS_MAX_CONNS_PER_IP=%q — using default 2", v)
+		}
+	}
+
 	// Open persistent spot store
 	dbPath := dir + "/spots.db"
 	store, err := OpenStore(dbPath)
@@ -209,12 +227,14 @@ func main() {
 	// Fetch country list for web UI filter
 	countries := fetchCountries(*ubersdrURL)
 
+	log.Printf("  ws limits: max %d global, %d per-IP", wsMaxConns, wsMaxConnsPerIP)
+
 	// Start web server
 	web, err := NewWebServer(*webListen, *telnetListen, ReceiverInfo{
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,
-	}, countries, telnet, hub)
+	}, countries, telnet, hub, wsMaxConns, wsMaxConnsPerIP)
 	if err != nil {
 		log.Fatalf("web server init: %v", err)
 	}

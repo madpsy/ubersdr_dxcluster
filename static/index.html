@@ -63,7 +63,7 @@
     <span class="val" id="hdr-telnet-port">—</span>
     <span class="lbl" style="margin-left:6px">Clients</span>
     <span class="val" id="hdr-telnet-clients">0</span>
-    <button id="term-open-btn" class="term-open-btn" title="Open web terminal" onclick="openTerminal()">&#x1F5A5;</button>
+    <button id="term-open-btn" class="term-open-btn" title="Open web terminal" onclick="openTerminal()">&gt;_</button>
   </div>
   <div class="stat-pill"><span class="lbl">Total</span><span class="val" id="hdr-total">0</span></div>
   <div class="stat-pill"><span class="lbl">Digital</span><span class="val" id="hdr-decoder">0</span></div>
@@ -332,6 +332,7 @@
     <div class="term-hdr">
       <span class="term-title">&#x1F5A5; Web Terminal</span>
       <span id="term-status" class="term-status"></span>
+      <button id="term-disconnect" class="term-disconnect-btn" style="display:none" title="Disconnect session">Disconnect</button>
       <button id="term-close" class="term-close" title="Close">&#x2715;</button>
     </div>
 

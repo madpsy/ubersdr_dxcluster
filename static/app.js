@@ -168,7 +168,64 @@ async function pollStatus() {
     if (clientsEl && typeof data.telnet_clients === 'number') {
       clientsEl.textContent = data.telnet_clients;
     }
+    // Update the client tooltip on the Clients badge
+    updateClientTooltip(data.telnet_client_list || []);
   } catch(_) {}
+}
+
+/**
+ * Build or update a tooltip on the "Clients" value span showing masked IPs
+ * and callsigns of connected telnet/web-terminal clients.
+ * The tooltip is a plain <div> positioned via CSS — no external libraries.
+ * All content is set via textContent (XSS-safe).
+ *
+ * @param {Array<{ip: string, callsign: string}>} clients
+ */
+function updateClientTooltip(clients) {
+  const clientsEl = document.getElementById('hdr-telnet-clients');
+  if (!clientsEl) return;
+
+  // Find or create the tooltip element
+  let tip = document.getElementById('client-ip-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'client-ip-tip';
+    tip.className = 'client-ip-tip';
+    // Insert after the clients element inside the pill
+    clientsEl.parentNode.insertBefore(tip, clientsEl.nextSibling);
+
+    // Show/hide on hover of the whole pill
+    const pill = document.getElementById('telnet-pill');
+    if (pill) {
+      pill.addEventListener('mouseenter', () => {
+        if (tip.childNodes.length > 0) tip.classList.add('visible');
+      });
+      pill.addEventListener('mouseleave', () => {
+        tip.classList.remove('visible');
+      });
+    }
+  }
+
+  // Rebuild tooltip content
+  tip.textContent = '';
+  if (!clients || clients.length === 0) {
+    const line = document.createElement('span');
+    line.className = 'client-ip-tip-line client-ip-tip-empty';
+    line.textContent = 'No clients connected';
+    tip.appendChild(line);
+  } else {
+    clients.forEach(c => {
+      const line = document.createElement('span');
+      line.className = 'client-ip-tip-line';
+      // Show "CALLSIGN  xxx.xxx.1.2" or just "xxx.xxx.1.2" if no callsign yet
+      if (c.callsign) {
+        line.textContent = c.callsign + '\u2002' + c.ip;
+      } else {
+        line.textContent = c.ip + '\u2002(logging in…)';
+      }
+      tip.appendChild(line);
+    });
+  }
 }
 
 function setConnState(state) {
