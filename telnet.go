@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // callsignRe is the DX Spider is_callsign() regex translated to Go.
@@ -47,6 +48,7 @@ type TelnetServer struct {
 	clients      atomic.Int32
 	version      string
 	requireLogin bool
+	startTime    time.Time
 }
 
 func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string, rx ReceiverInfo, ubersdrURL string, requireLogin bool) *TelnetServer {
@@ -62,6 +64,7 @@ func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string
 		ubersdrURL:   ubersdrURL,
 		version:      "ubersdr_dxcluster/1.0",
 		requireLogin: requireLogin,
+		startTime:    time.Now(),
 	}
 }
 

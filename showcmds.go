@@ -210,3 +210,86 @@ func (t *TelnetServer) handleShowHFStats(args []string) string {
 	}
 	return b.String()
 }
+
+// ── show/status ─────────────────────────────────────────────────────────────
+
+// handleShowStatus shows database statistics, uptime, and connected clients.
+func (t *TelnetServer) handleShowStatus() string {
+	var b strings.Builder
+
+	// Uptime
+	uptime := time.Since(t.startTime)
+	days := int(uptime.Hours()) / 24
+	hours := int(uptime.Hours()) % 24
+	mins := int(uptime.Minutes()) % 60
+	fmt.Fprintf(&b, "UberSDR DX Cluster — %s\r\n", t.version)
+	fmt.Fprintf(&b, "Uptime    : %dd %02dh %02dm\r\n", days, hours, mins)
+	fmt.Fprintf(&b, "Clients   : %d connected\r\n", t.ClientCount())
+	fmt.Fprintf(&b, "Receiver  : %s — %s\r\n", t.rxName, t.rxLocation)
+
+	if t.store == nil {
+		b.WriteString("Database  : not available\r\n")
+		return b.String()
+	}
+
+	streams, oldest, newest, sizeKB, err := t.store.StatsOverview()
+	if err != nil {
+		fmt.Fprintf(&b, "Database  : error — %v\r\n", err)
+		return b.String()
+	}
+
+	// Total spot count
+	var total int64
+	for _, sc := range streams {
+		total += sc.Count
+	}
+	fmt.Fprintf(&b, "DB Spots  : %s total", commaInt(total))
+	if sizeKB > 0 {
+		if sizeKB >= 1024 {
+			fmt.Fprintf(&b, " (%.1f MB on disk)", float64(sizeKB)/1024)
+		} else {
+			fmt.Fprintf(&b, " (%d KB on disk)", sizeKB)
+		}
+	}
+	b.WriteString("\r\n")
+
+	// Date range
+	if !oldest.IsZero() && !newest.IsZero() {
+		fmt.Fprintf(&b, "DB Range  : %s → %s\r\n",
+			oldest.Format("2-Jan-2006 15:04Z"),
+			newest.Format("2-Jan-2006 15:04Z"))
+	}
+
+	// Per-stream breakdown
+	streamLabels := map[string]string{
+		string(StreamDecoder):       "Digital (FT8/FT4/WSPR)",
+		string(StreamCWSkimmer):     "CW Skimmer",
+		string(StreamVoiceActivity): "Voice Activity",
+		string(StreamDXCluster):     "DX Cluster",
+	}
+	for _, sc := range streams {
+		label := streamLabels[sc.Stream]
+		if label == "" {
+			label = sc.Stream
+		}
+		fmt.Fprintf(&b, "  %-24s: %s\r\n", label, commaInt(sc.Count))
+	}
+
+	return strings.TrimRight(b.String(), "\r\n")
+}
+
+// commaInt formats an int64 with thousands separators, e.g. 1234567 → "1,234,567".
+func commaInt(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out)
+}

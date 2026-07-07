@@ -168,6 +168,8 @@ INFORMATION
       show/dx day 30
       show/dx 20 call 9a on 20m day 30
       show/dx on 40m mode CW day 3
+  show/status                   Show cluster status: uptime, clients, DB stats
+                                  e.g. show/status  (or sh/stat)
   show/qrz <callsign>           Look up callbook details for a callsign
                                   e.g. show/qrz g1tlh  (or sh/qrz g1tlh)
                                   Data provided by qrz.com via UberSDR
@@ -221,6 +223,8 @@ func expandAbbrev(cmd string) string {
 		"sh/dxstats": "show/dxstats",
 		"sh/hfstat":  "show/hfstats",
 		"sh/hfstats": "show/hfstats",
+		"sh/stat":    "show/status",
+		"sh/status":  "show/status",
 		"set/f":      "set/filter",
 		"clr/f":      "clear/filter",
 		"clr/filter": "clear/filter",
@@ -294,6 +298,9 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 
 	case "show/hfstats":
 		return t.handleShowHFStats(parts[1:])
+
+	case "show/status":
+		return t.handleShowStatus()
 
 	// ── Stream toggles ─────────────────────────────────────────────────────
 	case "set/dx":

@@ -425,6 +425,53 @@ func (s *SpotStore) Count() int64 {
 	return n
 }
 
+// StreamCount is one row of the show/status stream breakdown.
+type StreamCount struct {
+	Stream string
+	Count  int64
+}
+
+// StatsOverview returns per-stream spot counts and the oldest/newest spot
+// timestamps for the show/status command.
+func (s *SpotStore) StatsOverview() (streams []StreamCount, oldest, newest time.Time, dbSizeKB int64, err error) {
+	// Per-stream counts
+	rows, e := s.db.Query(`SELECT stream, COUNT(*) FROM spots GROUP BY stream ORDER BY COUNT(*) DESC`)
+	if e != nil {
+		err = e
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var sc StreamCount
+		if e := rows.Scan(&sc.Stream, &sc.Count); e != nil {
+			err = e
+			return
+		}
+		streams = append(streams, sc)
+	}
+	if e := rows.Err(); e != nil {
+		err = e
+		return
+	}
+
+	// Oldest and newest spot timestamps
+	var oldestTS, newestTS sql.NullInt64
+	_ = s.db.QueryRow(`SELECT MIN(ts), MAX(ts) FROM spots`).Scan(&oldestTS, &newestTS)
+	if oldestTS.Valid {
+		oldest = time.Unix(oldestTS.Int64, 0).UTC()
+	}
+	if newestTS.Valid {
+		newest = time.Unix(newestTS.Int64, 0).UTC()
+	}
+
+	// DB file size via SQLite page_count * page_size
+	var pageCount, pageSize int64
+	_ = s.db.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+	_ = s.db.QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+	dbSizeKB = (pageCount * pageSize) / 1024
+	return
+}
+
 // DayCount is one row of the show/dxstats output: a date and spot total.
 type DayCount struct {
 	Date  string // YYYY-MM-DD (UTC)
