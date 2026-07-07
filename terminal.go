@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,7 +169,12 @@ func (tp *TerminalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// X-Forwarded-For. We only trust these headers when the connection comes
 	// from a trusted proxy (the web server itself sets them via Caddy/nginx).
 	// For direct connections, r.RemoteAddr is authoritative.
-	realIP := realClientIP(r)
+	realIP, ipSource := realClientIPDebug(r)
+	log.Printf("[terminal] connect: RemoteAddr=%s X-Real-IP=%q X-Forwarded-For=%q → resolved=%s (via %s)",
+		r.RemoteAddr,
+		r.Header.Get("X-Real-IP"),
+		r.Header.Get("X-Forwarded-For"),
+		realIP, ipSource)
 
 	// ── 3. Per-IP connection limit ─────────────────────────────────────────
 	// Check before upgrading so we can return a plain HTTP 429.
@@ -181,9 +187,14 @@ func (tp *TerminalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── 4. WebSocket upgrade (same-origin only) ────────────────────────────
+	// ── 4. WebSocket upgrade ───────────────────────────────────────────────
+	// InsecureSkipVerify: true — we are always behind UberSDR's addon proxy
+	// which enforces authentication and IP allowlists before requests reach
+	// us. The Origin header contains the browser's public domain while Host
+	// is the internal Docker hostname (dxcluster:6087), so same-origin
+	// checking would always fail. Port 6087 is not exposed outside Docker.
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: false, // enforce same-origin check
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		log.Printf("[terminal] WebSocket upgrade failed from %s: %v", realIP, err)
@@ -216,21 +227,26 @@ func (tp *TerminalProxy) ActiveSessions() int {
 // Checks X-Real-IP first (set by Caddy/nginx), then X-Forwarded-For,
 // then falls back to RemoteAddr.
 func realClientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
+	ip, _ := realClientIPDebug(r)
+	return ip
+}
+
+// realClientIPDebug is like realClientIP but also returns which header was used.
+func realClientIPDebug(r *http.Request) (ip, source string) {
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return strings.TrimSpace(v), "X-Real-IP"
 	}
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
 		// X-Forwarded-For may be a comma-separated list; take the first.
-		for i := 0; i < len(ip); i++ {
-			if ip[i] == ',' {
-				return ip[:i]
-			}
+		first := v
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			first = v[:i]
 		}
-		return ip
+		return strings.TrimSpace(first), "X-Forwarded-For"
 	}
 	// Direct connection — strip port from RemoteAddr.
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+		return host, "RemoteAddr"
 	}
-	return r.RemoteAddr
+	return r.RemoteAddr, "RemoteAddr"
 }
