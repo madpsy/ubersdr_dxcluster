@@ -70,6 +70,12 @@
   <div class="stat-pill"><span class="lbl">CW</span><span class="val" id="hdr-cw">0</span></div>
   <div class="stat-pill"><span class="lbl">Voice</span><span class="val" id="hdr-voice">0</span></div>
   <div class="stat-pill"><span class="lbl">DX</span><span class="val" id="hdr-dx">0</span></div>
+  <div class="stat-pill" title="Download the desktop DX Cluster client (auto-detects your OS)">
+    <span class="lbl">Client</span>
+    <a class="val" href="{{.BasePath}}/client/download" style="text-decoration:underline;cursor:pointer">Download</a>
+    <a class="val" href="{{.BasePath}}/client/download?os=linux" style="text-decoration:underline;cursor:pointer" title="Linux build">Linux</a>
+    <a class="val" href="{{.BasePath}}/client/download?os=windows" style="text-decoration:underline;cursor:pointer" title="Windows build">Windows</a>
+  </div>
   <button id="help-btn" title="Telnet command reference" onclick="openHelpModal()">?</button>
 </header>
 
@@ -322,6 +328,14 @@
     </div>
   </div>
 
+</div>
+
+<!-- Centered desktop client download (auto-detects the visitor's OS) -->
+<div class="download-footer">
+  <a class="download-client-btn" href="{{.BasePath}}/client/download"
+     title="Download the desktop DX Cluster client for your operating system">
+    ⬇️ Download Client
+  </a>
 </div>
 
 <!-- ── Web Terminal Modal ──────────────────────────────────────────────── -->

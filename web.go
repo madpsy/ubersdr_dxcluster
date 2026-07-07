@@ -8,9 +8,22 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
+
+// defaultClientsDir is where the desktop client binaries live in the container
+// (see Dockerfile). Overridable via the CLIENTS_DIR env var.
+const defaultClientsDir = "/usr/local/share/dxcluster/clients"
+
+// clientDownloads maps the public download path to the on-disk filename.
+// Restricting to known names avoids directory listing and path traversal.
+var clientDownloads = map[string]string{
+	"dxcluster":     "dxcluster",     // Linux amd64
+	"dxcluster.exe": "dxcluster.exe", // Windows amd64
+}
 
 //go:embed static
 var staticFiles embed.FS
@@ -93,6 +106,10 @@ func (w *WebServer) ListenAndServe() error {
 	mux.HandleFunc("/api/status", w.handleStatus)
 	mux.HandleFunc("/api/help", w.handleHelp)
 	mux.HandleFunc("/api/countries", w.handleCountries)
+
+	// Desktop client binary downloads
+	mux.HandleFunc("/clients/", w.handleClients)               // fixed names
+	mux.HandleFunc("/client/download", w.handleClientDownload) // OS-detected, callsign-named
 
 	log.Printf("[web] listening on %s", w.addr)
 	return http.ListenAndServe(w.addr, mux)
@@ -193,6 +210,95 @@ func (w *WebServer) handleCountries(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(rw).Encode(w.countries)
+}
+
+// clientsDir returns the directory holding the desktop client binaries.
+func (w *WebServer) clientsDir() string {
+	if dir := os.Getenv("CLIENTS_DIR"); dir != "" {
+		return dir
+	}
+	return defaultClientsDir
+}
+
+// serveClientFile writes the given on-disk client binary as a download using
+// downloadName as the filename presented to the browser.
+func (w *WebServer) serveClientFile(rw http.ResponseWriter, r *http.Request, srcFile, downloadName string) {
+	f, err := os.Open(filepath.Join(w.clientsDir(), srcFile))
+	if err != nil {
+		http.Error(rw, "client binary not available", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(rw, r)
+		return
+	}
+	rw.Header().Set("Content-Type", "application/octet-stream")
+	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
+	http.ServeContent(rw, r, downloadName, info.ModTime(), f)
+}
+
+// handleClients serves the desktop client binaries under their fixed names.
+// Only the known filenames are exposed; anything else is a 404.
+func (w *WebServer) handleClients(rw http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/clients/")
+	fname, ok := clientDownloads[name]
+	if !ok {
+		http.NotFound(rw, r)
+		return
+	}
+	w.serveClientFile(rw, r, fname, fname)
+}
+
+// handleClientDownload serves the desktop client for the requesting OS, named
+// after this instance's callsign, e.g. ubersdr_m9psy or ubersdr_m9psy.exe.
+// The downloaded name is what the client parses at startup to auto-target this
+// instance's callsign.
+func (w *WebServer) handleClientDownload(rw http.ResponseWriter, r *http.Request) {
+	srcFile, ext := "dxcluster", ""
+	if detectClientOS(r) == "windows" {
+		srcFile, ext = "dxcluster.exe", ".exe"
+	}
+
+	call := sanitizeCallsign(w.rxCallsign)
+	if call == "" {
+		call = "client"
+	}
+	w.serveClientFile(rw, r, srcFile, "ubersdr_"+call+ext)
+}
+
+// detectClientOS returns "windows" or "linux" for the requesting browser.
+// An explicit ?os= override wins; otherwise the Sec-CH-UA-Platform client hint
+// (sent by Chromium browsers) is preferred, falling back to the User-Agent.
+// Non-Windows platforms map to the Linux build.
+func detectClientOS(r *http.Request) string {
+	if v := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("os"))); v == "windows" || v == "linux" {
+		return v
+	}
+	if p := strings.Trim(r.Header.Get("Sec-CH-UA-Platform"), `"`); p != "" {
+		if strings.EqualFold(p, "Windows") {
+			return "windows"
+		}
+		return "linux"
+	}
+	if strings.Contains(r.UserAgent(), "Windows") {
+		return "windows"
+	}
+	return "linux"
+}
+
+// sanitizeCallsign lowercases a callsign and keeps only filename-safe chars
+// ([a-z0-9-]), so it can be embedded in a download filename.
+func sanitizeCallsign(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // handleStatus returns a simple health/status JSON including telnet client count.

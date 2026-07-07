@@ -56,6 +56,8 @@ stage_context() {
               --exclude='recordings' \
               --exclude='data' \
               --exclude='ubersdr_dxcluster' \
+              --exclude='client/dist' \
+              --exclude='client/*.syso' \
               "$SCRIPT_DIR/" "$TMPCTX/"
 }
 

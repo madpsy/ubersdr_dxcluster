@@ -1,0 +1,5 @@
+/dist/
+/client
+ubersdr-dxcluster-client
+*.exe
+*.syso
