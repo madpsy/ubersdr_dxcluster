@@ -285,6 +285,12 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 			return
 
 		case line := <-cmdCh:
+			// Some clients re-send the callsign as a command after login
+			// (e.g. logging software that always sends the callsign on connect).
+			// Silently ignore it rather than returning "unknown command".
+			if state.Name != "" && strings.EqualFold(strings.TrimSpace(line), state.Name) {
+				continue
+			}
 			resp := t.handleCommand(line, state)
 			if resp != "" {
 				fmt.Fprintf(conn, "%s\r\n", resp)

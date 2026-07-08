@@ -33,6 +33,11 @@ services:
       # than once per window. Real-time streaming is unaffected.
       # VOICE_DEDUP_MINS: "10"
       #
+      # Decoder (digital) spot dedup window in minutes (default: 5, set to 0 to disable)
+      # Prevents the same digital spot (callsign+band+mode e.g. FT8/FT4) being stored
+      # more than once per window. Real-time streaming is unaffected.
+      # DECODER_DEDUP_MINS: "5"
+      #
       # Maximum simultaneous web-terminal (WebSocket) sessions across all IPs (default: 25)
       # WS_MAX_CONNS: "25"
       #

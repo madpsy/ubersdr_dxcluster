@@ -154,6 +154,16 @@ func main() {
 		}
 	}
 
+	// Resolve decoder (digital) dedup window: DECODER_DEDUP_MINS env var > default (5)
+	decoderDedupMins := 5
+	if v := os.Getenv("DECODER_DEDUP_MINS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			decoderDedupMins = n
+		} else {
+			log.Printf("invalid DECODER_DEDUP_MINS=%q — using default 5", v)
+		}
+	}
+
 	// Resolve WebSocket terminal limits: WS_MAX_CONNS / WS_MAX_CONNS_PER_IP env vars
 	wsMaxConns := 25
 	if v := os.Getenv("WS_MAX_CONNS"); v != "" {
@@ -183,6 +193,12 @@ func main() {
 		log.Printf("  voice dedup: %d min window", voiceDedupMins)
 	} else {
 		log.Printf("  voice dedup: disabled")
+	}
+	if decoderDedupMins > 0 {
+		store.SetDecoderDedupWindow(time.Duration(decoderDedupMins) * time.Minute)
+		log.Printf("  decoder dedup: %d min window", decoderDedupMins)
+	} else {
+		log.Printf("  decoder dedup: disabled")
 	}
 	go store.Run()
 	go store.RunPurge(retain)

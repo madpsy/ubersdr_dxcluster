@@ -182,7 +182,7 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.sendBtn.Disable()
 	inputRow := container.NewBorder(nil, nil, nil, u.sendBtn, u.inputEntry)
 
-	center := container.NewBorder(termHeader, inputRow, nil, nil, u.term.scroll)
+	center := container.NewBorder(termHeader, inputRow, nil, nil, u.term.list)
 
 	// ── Status bar ─────────────────────────────────────────────────────────
 	u.statusLabel = widget.NewLabel("")
@@ -407,7 +407,7 @@ func (u *appUI) showInstancePicker() {
 // a callsign is ready), (re)connects to it — the one-click "switch" path.
 func (u *appUI) chooseInstance(inst Instance) {
 	u.current = &inst
-	u.instanceLabel.SetText(inst.Name)
+	u.instanceLabel.SetText(inst.Callsign + " — " + inst.Name)
 	u.refreshAutoCheck()
 
 	switch {
@@ -555,7 +555,7 @@ func (u *appUI) switchTo(inst Instance) {
 	}
 
 	if old := u.client.Swap(nil); old != nil {
-		old.Stop() // sends BYE to the previous instance
+		go old.Stop() // sends BYE to the previous instance (off UI thread to avoid deadlock)
 	}
 
 	u.term.clear()
@@ -591,8 +591,15 @@ func (u *appUI) newListener(port int) *TelnetListener {
 
 // newClient builds a WebSocket client bound to the given (persistent) listener.
 func (u *appUI) newClient(inst Instance, call string, listener *TelnetListener) *DXClusterClient {
-	c := NewDXClusterClient(inst.TerminalWSURL(), call,
+	var c *DXClusterClient
+	c = NewDXClusterClient(inst.TerminalWSURL(), call,
 		func(text string) { // server output
+			// Guard: if this client is no longer the active one (user
+			// disconnected), silently drop the text rather than appending
+			// stale output to the terminal.
+			if u.client.Load() != c {
+				return
+			}
 			u.term.append(text)
 			if listener != nil {
 				listener.Broadcast(text)
@@ -736,8 +743,12 @@ func (u *appUI) sendCommand() {
 }
 
 func (u *appUI) disconnect() {
+	// Swap out the client and stop it off the UI thread to avoid a deadlock:
+	// c.Stop() blocks on wg.Wait() while the read goroutine may be trying to
+	// schedule UI work via fyne.Do, which would deadlock if Stop() were called
+	// on the UI thread.
 	if c := u.client.Swap(nil); c != nil {
-		c.Stop()
+		go c.Stop()
 	}
 	if u.listener != nil {
 		u.listener.Stop()
@@ -823,52 +834,111 @@ func (c *tappableCell) DoubleTapped(_ *fyne.PointEvent) {
 	}
 }
 
-// ── terminalView: a bounded, auto-scrolling monospace text pane ────────────
+// ── terminalView: a bounded, auto-scrolling virtualised text pane ──────────
 
+// termMaxLines is the maximum number of lines kept in the scrollback buffer.
+// widget.List only renders visible rows, so this can be generous without cost.
+const termMaxLines = 250
+
+// termFlushInterval is how often the UI list is refreshed. Batching updates
+// at 10 Hz means at most one Refresh call per 100 ms regardless of spot rate.
+const termFlushInterval = 100 * time.Millisecond
+
+// terminalView uses widget.List for virtualised rendering: only the rows
+// currently visible on screen are rendered, so CPU cost is O(visible rows)
+// rather than O(total buffer size).
 type terminalView struct {
-	label  *widget.Label
-	scroll *container.Scroll
+	list *widget.List
 
-	mu  sync.Mutex
-	buf string
+	mu      sync.Mutex
+	lines   []string // ring of up to termMaxLines complete lines
+	pending string   // incomplete line fragment not yet terminated by \n
+	dirty   bool     // true when lines/pending changed since last flush
 }
 
-// termMaxChars bounds the scrollback so the label never grows unbounded.
-const termMaxChars = 120000
-
 func newTerminalView() *terminalView {
-	lbl := widget.NewLabel("")
-	lbl.TextStyle = fyne.TextStyle{Monospace: true}
-	lbl.Wrapping = fyne.TextWrapWord
-	tv := &terminalView{label: lbl}
-	tv.scroll = container.NewVScroll(lbl)
+	tv := &terminalView{}
+
+	tv.list = widget.NewList(
+		func() int { // length
+			tv.mu.Lock()
+			defer tv.mu.Unlock()
+			return len(tv.lines)
+		},
+		func() fyne.CanvasObject { // create template cell
+			lbl := widget.NewLabel("")
+			lbl.TextStyle = fyne.TextStyle{Monospace: true}
+			lbl.Truncation = fyne.TextTruncateOff
+			return lbl
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) { // update cell
+			tv.mu.Lock()
+			var text string
+			if id < len(tv.lines) {
+				text = tv.lines[id]
+			}
+			tv.mu.Unlock()
+			obj.(*widget.Label).SetText(text)
+		},
+	)
+
+	// Background ticker: flush pending changes to the list at most 10×/sec.
+	go func() {
+		ticker := time.NewTicker(termFlushInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			tv.mu.Lock()
+			if !tv.dirty {
+				tv.mu.Unlock()
+				continue
+			}
+			n := len(tv.lines)
+			tv.dirty = false
+			tv.mu.Unlock()
+			fyne.Do(func() {
+				tv.list.Refresh()
+				if n > 0 {
+					tv.list.ScrollToBottom()
+				}
+			})
+		}
+	}()
+
 	return tv
 }
 
-// append adds server text to the pane, trimming old content to termMaxChars
-// (on a line boundary) and auto-scrolling to the bottom. Safe to call from
-// any goroutine.
+// append adds server text to the pane. Safe to call from any goroutine.
+// Text is split on newlines; complete lines are added to the ring buffer and
+// the list is refreshed by the background ticker (at most 10×/sec).
 func (tv *terminalView) append(text string) {
+	// Normalise CR/LF → LF so lines split cleanly.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
 	tv.mu.Lock()
-	tv.buf += text
-	if len(tv.buf) > termMaxChars {
-		tv.buf = tv.buf[len(tv.buf)-termMaxChars:]
-		if i := strings.IndexByte(tv.buf, '\n'); i >= 0 {
-			tv.buf = tv.buf[i+1:]
+	defer tv.mu.Unlock()
+
+	// Combine any leftover fragment with the new text, then split on newlines.
+	combined := tv.pending + text
+	parts := strings.Split(combined, "\n")
+
+	// All but the last element are complete lines.
+	for _, line := range parts[:len(parts)-1] {
+		tv.lines = append(tv.lines, line)
+		if len(tv.lines) > termMaxLines {
+			tv.lines = tv.lines[len(tv.lines)-termMaxLines:]
 		}
 	}
-	content := tv.buf
-	tv.mu.Unlock()
-
-	fyne.Do(func() {
-		tv.label.SetText(content)
-		tv.scroll.ScrollToBottom()
-	})
+	// The last element is the new incomplete fragment (may be "").
+	tv.pending = parts[len(parts)-1]
+	tv.dirty = true
 }
 
 func (tv *terminalView) clear() {
 	tv.mu.Lock()
-	tv.buf = ""
+	tv.lines = tv.lines[:0]
+	tv.pending = ""
+	tv.dirty = false
 	tv.mu.Unlock()
-	fyne.Do(func() { tv.label.SetText("") })
+	fyne.Do(func() { tv.list.Refresh() })
 }

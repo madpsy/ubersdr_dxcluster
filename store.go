@@ -85,6 +85,12 @@ type SpotStore struct {
 	voiceDedupWindow time.Duration
 	voiceDedupMu     sync.Mutex
 	voiceDedup       map[string]time.Time // key → last-seen time
+
+	// Decoder spot dedup: skip inserting a decoder spot if the same
+	// (callsign, band, mode) was seen within decoderDedupWindow.
+	decoderDedupWindow time.Duration
+	decoderDedupMu     sync.Mutex
+	decoderDedup       map[string]time.Time // key → last-seen time
 }
 
 // OpenStore opens (or creates) the SQLite database at path, applies the
@@ -134,9 +140,10 @@ func OpenStore(path string) (*SpotStore, error) {
 	}
 
 	s := &SpotStore{
-		db:         db,
-		in:         make(chan Spot, 4096),
-		voiceDedup: make(map[string]time.Time),
+		db:           db,
+		in:           make(chan Spot, 4096),
+		voiceDedup:   make(map[string]time.Time),
+		decoderDedup: make(map[string]time.Time),
 	}
 	return s, nil
 }
@@ -155,10 +162,26 @@ func voiceDedupKey(sp Spot) string {
 	return fmt.Sprintf("%s|%d|%s", sp.Callsign, freqKHz, sp.VoiceMode)
 }
 
+// SetDecoderDedupWindow configures the dedup window for decoder (digital) spots.
+// A zero or negative value disables dedup entirely.
+func (s *SpotStore) SetDecoderDedupWindow(d time.Duration) {
+	s.decoderDedupWindow = d
+}
+
+// decoderDedupKey returns the dedup key for a decoder spot:
+// "callsign|band|mode" — same callsign on the same band/mode within the
+// window is considered a duplicate.
+func decoderDedupKey(sp Spot) string {
+	return fmt.Sprintf("%s|%s|%s", sp.Callsign, sp.Band, sp.Mode)
+}
+
 // Publish queues a spot for async insertion. Non-blocking — drops if full.
 // Voice spots are deduplicated: if the same (callsign, freq, mode) was seen
 // within voiceDedupWindow, the spot is silently dropped from the DB write
 // path (real-time streaming via the hub ring buffer is unaffected).
+// Decoder (digital) spots are deduplicated: if the same (callsign, band, mode)
+// was seen within decoderDedupWindow, the spot is silently dropped from the DB
+// write path.
 func (s *SpotStore) Publish(spot Spot) {
 	if spot.Stream == StreamVoiceActivity && s.voiceDedupWindow > 0 {
 		key := voiceDedupKey(spot)
@@ -178,6 +201,26 @@ func (s *SpotStore) Publish(spot Spot) {
 			}
 		}
 		s.voiceDedupMu.Unlock()
+	}
+
+	if spot.Stream == StreamDecoder && s.decoderDedupWindow > 0 {
+		key := decoderDedupKey(spot)
+		now := time.Now()
+
+		s.decoderDedupMu.Lock()
+		last, seen := s.decoderDedup[key]
+		if seen && now.Sub(last) < s.decoderDedupWindow {
+			s.decoderDedupMu.Unlock()
+			return // duplicate within window — skip DB insert
+		}
+		s.decoderDedup[key] = now
+		// Lazy sweep: remove entries older than the window to bound map size.
+		for k, t := range s.decoderDedup {
+			if now.Sub(t) >= s.decoderDedupWindow {
+				delete(s.decoderDedup, k)
+			}
+		}
+		s.decoderDedupMu.Unlock()
 	}
 
 	select {
