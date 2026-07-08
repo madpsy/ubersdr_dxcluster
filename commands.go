@@ -31,6 +31,7 @@ func expandAbbrev(cmd string) string {
 		"sh/hfstats": "show/hfstats",
 		"sh/stat":    "show/status",
 		"sh/status":  "show/status",
+		"sh/who":     "show/who",
 		"set/f":      "set/filter",
 		"clr/f":      "clear/filter",
 		"clr/filter": "clear/filter",
@@ -107,6 +108,9 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 
 	case "show/status":
 		return t.handleShowStatus()
+
+	case "show/who":
+		return t.handleShowWho()
 
 	// ── Stream toggles ─────────────────────────────────────────────────────
 	case "set/dx":

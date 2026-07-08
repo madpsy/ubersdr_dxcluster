@@ -14,8 +14,9 @@ import (
 
 // clientEntry holds per-connection tracking data for the status tooltip.
 type clientEntry struct {
-	MaskedIP string `json:"ip"`
-	Callsign string `json:"callsign"` // empty until login completes
+	MaskedIP    string    `json:"ip"`
+	Callsign    string    `json:"callsign"`     // empty until login completes
+	ConnectedAt time.Time `json:"connected_at"` // when the connection was established
 }
 
 // callsignRe is the DX Spider is_callsign() regex translated to Go.
@@ -126,11 +127,28 @@ func maskIP(ip string) string {
 // registerConn adds a new connection entry and returns its unique ID.
 func (t *TelnetServer) registerConn(ip string) uint64 {
 	id := t.nextConnID.Add(1)
-	entry := &clientEntry{MaskedIP: maskIP(ip)}
+	entry := &clientEntry{MaskedIP: maskIP(ip), ConnectedAt: time.Now()}
 	t.clientsMu.Lock()
 	t.clientMap[id] = entry
 	t.clientsMu.Unlock()
 	return id
+}
+
+// formatDuration formats a duration as "Xh Ym Zs", omitting leading zero units.
+// e.g. 3723s → "1h 2m 3s", 65s → "1m 5s", 45s → "45s".
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
 }
 
 // setConnCallsign updates the callsign for a connection after login.

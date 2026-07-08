@@ -175,6 +175,8 @@ INFORMATION
                                   e.g. show/heading VK  (or sh/hea VK)
   show/dxstats [days]           Show spot totals per day (default: 31 days)
   show/hfstats [days]           Show spot totals per band (default: 31 days)
+  show/who                      List all connected clients with IP, callsign and connect time
+                                  e.g. show/who  (or sh/who)
   show/time                     Show current UTC time
   show/version                  Show cluster software version
   help [<command>]              Show this help text

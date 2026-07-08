@@ -7,6 +7,33 @@ import (
 	"time"
 )
 
+// ── show/who ────────────────────────────────────────────────────────────────
+
+// handleShowWho implements SHOW/WHO.
+// Lists all currently connected telnet/WebSocket clients with their masked IP,
+// callsign (or "(logging in…)" if not yet logged in), and how long they have
+// been connected.
+func (t *TelnetServer) handleShowWho() string {
+	clients := t.ConnectedClients()
+	if len(clients) == 0 {
+		return "No clients currently connected."
+	}
+	now := time.Now()
+	var lines []string
+	lines = append(lines, fmt.Sprintf("%-12s %-20s %s", "Callsign", "IP", "Connected"))
+	lines = append(lines, strings.Repeat("-", 50))
+	for _, c := range clients {
+		call := c.Callsign
+		if call == "" {
+			call = "(logging in…)"
+		}
+		dur := formatDuration(now.Sub(c.ConnectedAt))
+		lines = append(lines, fmt.Sprintf("%-12s %-20s %s", call, c.MaskedIP, dur))
+	}
+	lines = append(lines, fmt.Sprintf("\n%d client(s) connected.", len(clients)))
+	return strings.Join(lines, "\r\n")
+}
+
 // ── show/prefix ─────────────────────────────────────────────────────────────
 
 // handleShowPrefix implements SHOW/PREFIX <call|prefix> ...

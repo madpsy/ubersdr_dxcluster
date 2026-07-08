@@ -190,12 +190,28 @@ async function pollStatus() {
 }
 
 /**
- * Build or update a tooltip on the "Clients" value span showing masked IPs
- * and callsigns of connected telnet/web-terminal clients.
+ * Format a connected_at ISO timestamp as a human duration "Xh Ym Zs".
+ * @param {string} isoTs  RFC3339 timestamp from the server
+ * @returns {string}
+ */
+function fmtConnDuration(isoTs) {
+  if (!isoTs) return '';
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(isoTs).getTime()) / 1000));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+
+/**
+ * Build or update a tooltip on the "Clients" value span showing masked IPs,
+ * callsigns, and connection duration of connected telnet/web-terminal clients.
  * The tooltip is a plain <div> positioned via CSS — no external libraries.
  * All content is set via textContent (XSS-safe).
  *
- * @param {Array<{ip: string, callsign: string}>} clients
+ * @param {Array<{ip: string, callsign: string, connected_at: string}>} clients
  */
 function updateClientTooltip(clients) {
   const clientsEl = document.getElementById('hdr-telnet-clients');
@@ -233,11 +249,12 @@ function updateClientTooltip(clients) {
     clients.forEach(c => {
       const line = document.createElement('span');
       line.className = 'client-ip-tip-line';
-      // Show "CALLSIGN  xxx.xxx.1.2" or just "xxx.xxx.1.2" if no callsign yet
+      const dur = fmtConnDuration(c.connected_at);
+      // Show "CALLSIGN  xxx.xxx.1.2  1h 4m 23s" or "(logging in…)  xxx.xxx.1.2  5s"
       if (c.callsign) {
-        line.textContent = c.callsign + '\u2002' + c.ip;
+        line.textContent = c.callsign + '\u2002' + c.ip + (dur ? '\u2002' + dur : '');
       } else {
-        line.textContent = c.ip + '\u2002(logging in…)';
+        line.textContent = c.ip + '\u2002(logging in…)' + (dur ? '\u2002' + dur : '');
       }
       tip.appendChild(line);
     });

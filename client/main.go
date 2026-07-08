@@ -182,7 +182,7 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.sendBtn.Disable()
 	inputRow := container.NewBorder(nil, nil, nil, u.sendBtn, u.inputEntry)
 
-	center := container.NewBorder(termHeader, inputRow, nil, nil, u.term.list)
+	center := container.NewBorder(termHeader, inputRow, nil, nil, u.term.scroll)
 
 	// ── Status bar ─────────────────────────────────────────────────────────
 	u.statusLabel = widget.NewLabel("")
@@ -283,40 +283,115 @@ func (u *appUI) showInstancePicker() {
 	filterEntry := widget.NewEntry()
 	filterEntry.SetPlaceHolder("Search callsign, name or location…")
 
-	var filtered []Instance
-	selected := -1
+	// ── selection state ────────────────────────────────────────────────────
+	// selectedLocal / selectedPublic track which row is highlighted in each
+	// table. Only one can be active at a time; selecting in one clears the other.
+	selectedLocal := -1
+	selectedPublic := -1
+	var localInsts []Instance // confirmed mDNS instances
+	var filtered []Instance   // filtered public instances
+	var localTable *widget.Table
 	var table *widget.Table
 	var d *dialog.ConfirmDialog
 
-	// Single-tap selects the row (via the table so the highlight updates);
-	// double-tap confirms the selection and closes the dialog.
-	onCellTap := func(row, col int) {
-		if table != nil {
-			table.Select(widget.TableCellID{Row: row, Col: col})
-		}
-	}
-	onCellDoubleTap := func(row int) {
-		if row < 0 || row >= len(filtered) {
+	confirmSelection := func() {
+		if selectedLocal >= 0 && selectedLocal < len(localInsts) {
+			if d != nil {
+				d.Hide()
+			}
+			u.chooseInstance(localInsts[selectedLocal])
 			return
 		}
-		if d != nil {
-			d.Hide()
+		if selectedPublic >= 0 && selectedPublic < len(filtered) {
+			if d != nil {
+				d.Hide()
+			}
+			u.chooseInstance(filtered[selectedPublic])
 		}
-		u.chooseInstance(filtered[row])
 	}
 
-	table = widget.NewTable(
-		func() (int, int) { return len(filtered), len(u.headers) },
+	// ── local (mDNS) table ─────────────────────────────────────────────────
+	localHdr := widget.NewLabelWithStyle("Local (on this network)", fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true})
+	localScanLbl := widget.NewLabel("Scanning…")
+
+	localTable = widget.NewTable(
+		func() (int, int) { return len(localInsts), len(u.headers) },
 		func() fyne.CanvasObject {
 			c := newTappableCell()
-			c.onTap = onCellTap
-			c.onDoubleTap = onCellDoubleTap
+			c.onTap = func(row, col int) {
+				selectedPublic = -1
+				if table != nil {
+					table.UnselectAll()
+				}
+				if localTable != nil {
+					localTable.Select(widget.TableCellID{Row: row, Col: col})
+				}
+			}
+			c.onDoubleTap = func(row int) {
+				selectedLocal = row
+				confirmSelection()
+			}
 			return c
 		},
 		func(id widget.TableCellID, o fyne.CanvasObject) {
 			cell := o.(*tappableCell)
 			cell.row, cell.col = id.Row, id.Col
-			// Callsign is the prominent, bold first column.
+			cell.TextStyle.Bold = id.Col == 0
+			if id.Row < 0 || id.Row >= len(localInsts) {
+				cell.SetText("")
+				return
+			}
+			inst := localInsts[id.Row]
+			switch id.Col {
+			case 0:
+				cell.SetText(inst.Callsign)
+			case 1:
+				cell.SetText(inst.Name)
+			case 2:
+				cell.SetText(inst.Location)
+			}
+		},
+	)
+	localTable.SetColumnWidth(0, 130)
+	localTable.SetColumnWidth(1, 320)
+	localTable.SetColumnWidth(2, 320)
+	localTable.OnSelected = func(id widget.TableCellID) {
+		selectedLocal = id.Row
+		selectedPublic = -1
+		if table != nil {
+			table.UnselectAll()
+		}
+	}
+
+	localSection := container.NewVBox(
+		container.NewHBox(localHdr, layout.NewSpacer(), localScanLbl),
+		localTable,
+	)
+
+	// ── public table ───────────────────────────────────────────────────────
+	table = widget.NewTable(
+		func() (int, int) { return len(filtered), len(u.headers) },
+		func() fyne.CanvasObject {
+			c := newTappableCell()
+			c.onTap = func(row, col int) {
+				selectedLocal = -1
+				if localTable != nil {
+					localTable.UnselectAll()
+				}
+				if table != nil {
+					table.Select(widget.TableCellID{Row: row, Col: col})
+				}
+			}
+			c.onDoubleTap = func(row int) {
+				selectedPublic = row
+				confirmSelection()
+			}
+			return c
+		},
+		func(id widget.TableCellID, o fyne.CanvasObject) {
+			cell := o.(*tappableCell)
+			cell.row, cell.col = id.Row, id.Col
 			cell.TextStyle.Bold = id.Col == 0
 			if id.Row < 0 || id.Row >= len(filtered) {
 				cell.SetText("")
@@ -347,7 +422,16 @@ func (u *appUI) showInstancePicker() {
 	table.SetColumnWidth(0, 130)
 	table.SetColumnWidth(1, 320)
 	table.SetColumnWidth(2, 320)
-	table.OnSelected = func(id widget.TableCellID) { selected = id.Row }
+	table.OnSelected = func(id widget.TableCellID) {
+		selectedPublic = id.Row
+		selectedLocal = -1
+		if localTable != nil {
+			localTable.UnselectAll()
+		}
+	}
+
+	publicHdr := widget.NewLabelWithStyle("Public instances", fyne.TextAlignLeading,
+		fyne.TextStyle{Bold: true})
 
 	apply := func() {
 		f := strings.ToLower(strings.TrimSpace(filterEntry.Text))
@@ -360,7 +444,7 @@ func (u *appUI) showInstancePicker() {
 				filtered = append(filtered, inst)
 			}
 		}
-		selected = -1
+		selectedPublic = -1
 		table.UnselectAll()
 		table.Refresh()
 	}
@@ -384,23 +468,52 @@ func (u *appUI) showInstancePicker() {
 		}()
 	}
 
+	// ── mDNS discovery ─────────────────────────────────────────────────────
+	// Declare mdns first so the onChange closure can reference it after assignment.
+	var mdns *MDNSDiscovery
+	var mdnsErr error
+	mdns, mdnsErr = NewMDNSDiscovery(func() {
+		fyne.Do(func() {
+			localInsts = mdns.Instances()
+			if len(localInsts) == 0 {
+				localScanLbl.SetText("Scanning…")
+			} else {
+				localScanLbl.SetText(fmt.Sprintf("%d found", len(localInsts)))
+			}
+			localTable.Refresh()
+		})
+	})
+	if mdnsErr != nil {
+		localScanLbl.SetText("mDNS unavailable")
+	}
+
+	// ── layout ─────────────────────────────────────────────────────────────
 	top := container.NewBorder(nil, nil, nil, refreshBtn, filterEntry)
-	content := container.NewBorder(top, nil, nil, nil, table)
+	publicSection := container.NewBorder(
+		widget.NewSeparator(), nil, nil, nil,
+		container.NewBorder(publicHdr, nil, nil, nil, table),
+	)
+	// Local section gets ~30% of height, public gets the rest.
+	split := container.NewVSplit(
+		container.NewBorder(nil, nil, nil, nil, localSection),
+		publicSection,
+	)
+	split.Offset = 0.3
+	content := container.NewBorder(top, nil, nil, nil, split)
 
 	d = dialog.NewCustomConfirm("Choose DX Cluster instance", "Select", "Cancel", content,
 		func(ok bool) {
+			if mdns != nil {
+				mdns.Stop()
+			}
 			if !ok {
 				return
 			}
-			if selected < 0 || selected >= len(filtered) {
-				u.setStatus("No instance selected")
-				return
-			}
-			u.chooseInstance(filtered[selected])
+			confirmSelection()
 		}, u.win)
-	d.Resize(fyne.NewSize(840, 540))
+	d.Resize(fyne.NewSize(840, 600))
 	d.Show()
-	u.win.Canvas().Focus(filterEntry) // ready to type-to-search immediately
+	u.win.Canvas().Focus(filterEntry)
 }
 
 // chooseInstance records the picked instance and, if a session was active (or
@@ -834,18 +947,20 @@ func (c *tappableCell) DoubleTapped(_ *fyne.PointEvent) {
 // ── terminalView: a bounded, auto-scrolling virtualised text pane ──────────
 
 // termMaxLines is the maximum number of lines kept in the scrollback buffer.
-// widget.List only renders visible rows, so this can be generous without cost.
+// With only 250 short lines the label render is fast and there's no
+// inter-row padding (unlike widget.List which adds padding between rows).
 const termMaxLines = 250
 
-// termFlushInterval is how often the UI list is refreshed. Batching updates
-// at 10 Hz means at most one Refresh call per 100 ms regardless of spot rate.
+// termFlushInterval is how often the UI label is refreshed. Batching updates
+// at 10 Hz means at most one SetText call per 100 ms regardless of spot rate.
 const termFlushInterval = 100 * time.Millisecond
 
-// terminalView uses widget.List for virtualised rendering: only the rows
-// currently visible on screen are rendered, so CPU cost is O(visible rows)
-// rather than O(total buffer size).
+// terminalView uses a single widget.Label inside a scroll container.
+// The 250-line ring buffer keeps the rendered string small, and the 10 Hz
+// ticker throttles redraws so CPU usage stays low even at high spot rates.
 type terminalView struct {
-	list *widget.List
+	label  *widget.Label
+	scroll *container.Scroll
 
 	mu      sync.Mutex
 	lines   []string // ring of up to termMaxLines complete lines
@@ -854,32 +969,13 @@ type terminalView struct {
 }
 
 func newTerminalView() *terminalView {
-	tv := &terminalView{}
+	lbl := widget.NewLabel("")
+	lbl.TextStyle = fyne.TextStyle{Monospace: true}
+	lbl.Wrapping = fyne.TextWrapOff
+	tv := &terminalView{label: lbl}
+	tv.scroll = container.NewVScroll(lbl)
 
-	tv.list = widget.NewList(
-		func() int { // length
-			tv.mu.Lock()
-			defer tv.mu.Unlock()
-			return len(tv.lines)
-		},
-		func() fyne.CanvasObject { // create template cell
-			lbl := widget.NewLabel("")
-			lbl.TextStyle = fyne.TextStyle{Monospace: true}
-			lbl.Truncation = fyne.TextTruncateOff
-			return lbl
-		},
-		func(id widget.ListItemID, obj fyne.CanvasObject) { // update cell
-			tv.mu.Lock()
-			var text string
-			if id < len(tv.lines) {
-				text = tv.lines[id]
-			}
-			tv.mu.Unlock()
-			obj.(*widget.Label).SetText(text)
-		},
-	)
-
-	// Background ticker: flush pending changes to the list at most 10×/sec.
+	// Background ticker: flush pending changes to the label at most 10×/sec.
 	go func() {
 		ticker := time.NewTicker(termFlushInterval)
 		defer ticker.Stop()
@@ -889,14 +985,12 @@ func newTerminalView() *terminalView {
 				tv.mu.Unlock()
 				continue
 			}
-			n := len(tv.lines)
+			content := strings.Join(tv.lines, "\n")
 			tv.dirty = false
 			tv.mu.Unlock()
 			fyne.Do(func() {
-				tv.list.Refresh()
-				if n > 0 {
-					tv.list.ScrollToBottom()
-				}
+				tv.label.SetText(content)
+				tv.scroll.ScrollToBottom()
 			})
 		}
 	}()
@@ -940,5 +1034,5 @@ func (tv *terminalView) clear() {
 	tv.pending = ""
 	tv.dirty = false
 	tv.mu.Unlock()
-	fyne.Do(func() { tv.list.Refresh() })
+	fyne.Do(func() { tv.label.SetText("") })
 }
