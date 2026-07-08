@@ -172,8 +172,16 @@
       }
       // Scroll output to bottom so the latest content is visible on re-open
       if (output) output.scrollTop = output.scrollHeight;
-      if (!connected && callsignInput) callsignInput.focus();
-      else if (connected && input) input.focus();
+      if (!connected) {
+        // Auto-connect if we have a callsign (either just restored or already typed)
+        if (callsignInput && callsignInput.value.trim()) {
+          connect();
+        } else if (callsignInput) {
+          callsignInput.focus();
+        }
+      } else if (input) {
+        input.focus();
+      }
     }
   }
 
@@ -257,27 +265,25 @@
    * @param {string} cmd
    */
   window.termSendCommand = function(cmd) {
-    openModal();
     if (connected && ws) {
-      // Already connected — echo locally and send immediately
+      // Already connected — open modal, echo locally and send immediately
+      openModal();
       appendOutput('> ' + cmd + '\n');
       ws.send(cmd + '\r\n');
     } else {
-      // Not connected — try to auto-connect if we have a saved callsign,
-      // then send the command once the session is established.
+      // openModal() will auto-connect if a callsign is available.
+      // Hook ws.onopen *before* calling openModal so we catch the connection.
       const savedCall = (() => {
         try { return localStorage.getItem(LS_CALLSIGN_KEY) || ''; } catch (_) { return ''; }
       })();
       if (savedCall) {
-        // Populate the callsign field and kick off a connection
-        if (callsignInput) callsignInput.value = savedCall;
-        // connect() creates ws synchronously; hook onopen before it fires
-        connect();
+        // openModal → connect() creates ws synchronously; patch onopen right after
+        openModal();
         if (ws) {
           const prevOnOpen = ws.onopen;
           ws.onopen = function(evt) {
             if (prevOnOpen) prevOnOpen.call(ws, evt);
-            // Wait for the callsign handshake to complete before sending
+            // Wait for the DX Spider callsign handshake before sending
             setTimeout(function() {
               if (connected && ws) {
                 appendOutput('> ' + cmd + '\n');
@@ -287,9 +293,9 @@
           };
         }
       } else {
-        // No saved callsign — pre-fill the command input and let the user connect manually
+        // No saved callsign — open modal and pre-fill the command input
+        openModal();
         if (input) { input.value = cmd; }
-        if (callsignInput) callsignInput.focus();
       }
     }
   };

@@ -105,6 +105,7 @@ type appUI struct {
 	connectBtn     *widget.Button
 	chooseBtn      *widget.Button
 	webBtn         *widget.Button
+	dxBtn          *widget.Button
 	autoCheck      *widget.Check
 	helpBtn        *widget.Button
 	audioTuneBtn   *widget.Button
@@ -155,12 +156,19 @@ func (u *appUI) build() fyne.CanvasObject {
 	})
 	u.autoCheck.Disable() // enabled once an instance is chosen
 
-	u.webBtn = widget.NewButton("🌐 Web", func() {
+	u.webBtn = widget.NewButton("UberSDR", func() {
 		if u.current != nil {
 			u.openURL(u.current.HTTPURL())
 		}
 	})
 	u.webBtn.Disable()
+
+	u.dxBtn = widget.NewButton("Web", func() {
+		if u.current != nil {
+			u.openURL(u.current.HTTPURL() + "/addon/dxcluster/")
+		}
+	})
+	u.dxBtn.Disable()
 
 	instanceRow := container.NewHBox(
 		u.chooseBtn,
@@ -168,6 +176,7 @@ func (u *appUI) build() fyne.CanvasObject {
 		u.instanceLabel,
 		layout.NewSpacer(),
 		u.webBtn,
+		u.dxBtn,
 		u.autoCheck,
 	)
 
@@ -802,11 +811,17 @@ func (u *appUI) refreshAutoCheck() {
 		if u.webBtn != nil {
 			u.webBtn.Disable()
 		}
+		if u.dxBtn != nil {
+			u.dxBtn.Disable()
+		}
 		return
 	}
 	u.autoCheck.Enable()
 	if u.webBtn != nil {
 		u.webBtn.Enable()
+	}
+	if u.dxBtn != nil {
+		u.dxBtn.Enable()
 	}
 	saved := u.loadAutoConnect()
 	var checked bool

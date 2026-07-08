@@ -116,6 +116,7 @@ header {
   border-bottom: 1px solid var(--border);
   padding: 0 20px; height: 52px;
   display: flex; align-items: center; gap: 12px;
+  flex-wrap: nowrap; overflow: hidden;
 }
 
 .logo {
@@ -151,6 +152,7 @@ header {
   padding: 3px 10px; border-radius: 20px;
   background: var(--surface2); border: 1px solid var(--border);
   font-size: 11px;
+  white-space: nowrap; flex-shrink: 0;
 }
 .rx-call { color: var(--blue); font-weight: 700; font-family: var(--mono); }
 .rx-loc  { color: var(--muted); }
@@ -575,6 +577,10 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 .term-send-btn:hover { border-color: var(--blue); color: var(--blue); }
 
 /* ── Responsive header ── */
+@media (max-width: 800px) {
+  /* Hide the location text before it can cause the rx-info pill to wrap */
+  .rx-loc { display: none; }
+}
 @media (max-width: 600px) {
   header { padding: 0 10px; gap: 8px; }
   .logo  { font-size: 14px; }
