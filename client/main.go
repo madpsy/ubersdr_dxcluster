@@ -61,6 +61,12 @@ const (
 	prefAudioHost        = "audio_host"         // e.g. "127.0.0.1"
 	prefAudioPort        = "audio_port"         // e.g. "9770"
 	prefAudioAutoConnect = "audio_auto_connect" // bool — connect audio client to the same instance
+
+	// flrig integration (XML-RPC sync with flrig transceiver control).
+	prefFlrigEnabled   = "flrig_enabled"   // bool — flrig sync on/off
+	prefFlrigHost      = "flrig_host"      // e.g. "127.0.0.1"
+	prefFlrigPort      = "flrig_port"      // e.g. "12345"
+	prefFlrigDirection = "flrig_direction" // "sdr-to-rig" | "rig-to-sdr" | "both"
 )
 
 func main() {
@@ -71,7 +77,10 @@ func main() {
 
 	ui := newAppUI(w, a.Preferences())
 	w.SetContent(ui.build())
-	w.SetOnClosed(ui.disconnect)
+	w.SetOnClosed(func() {
+		ui.disconnect()
+		ui.stopFlrig()
+	})
 
 	ui.startupPending = true
 	ui.refresh() // initial fetch; then auto-connects or opens the picker
@@ -109,23 +118,57 @@ type appUI struct {
 	autoCheck      *widget.Check
 	helpBtn        *widget.Button
 	audioTuneBtn   *widget.Button
+	flrigBtn       *widget.Button
 	startupCmdsBtn *widget.Button
 	inputEntry     *widget.Entry
 	sendBtn        *widget.Button
 	statusLabel    *widget.Label
 	telnetLabel    *widget.Label
 	audioLabel     *widget.Label // shows last audio-client tune result
+	flrigLabel     *widget.Label // shows flrig sync status
 	term           *terminalView
+
+	flrig *FlrigSync // bidirectional freq/mode sync with flrig
 
 	headers []string
 }
 
 func newAppUI(w fyne.Window, prefs fyne.Preferences) *appUI {
-	return &appUI{
+	ui := &appUI{
 		win:     w,
 		prefs:   prefs,
 		headers: []string{"Callsign", "Name", "Location"},
 	}
+
+	// Initialise flrig sync engine and apply saved preferences.
+	ui.flrig = NewFlrigSync()
+	ui.flrig.OnStatus = func(connected bool, msg string) {
+		fyne.Do(func() {
+			if ui.flrigLabel == nil {
+				return
+			}
+			if connected {
+				ui.flrigLabel.Importance = widget.SuccessImportance
+				ui.flrigLabel.SetText("flrig ✓")
+			} else {
+				ui.flrigLabel.Importance = widget.MediumImportance
+				if msg == "Disabled" {
+					ui.flrigLabel.SetText("")
+				} else {
+					ui.flrigLabel.SetText("flrig ✗")
+				}
+			}
+		})
+	}
+	ui.flrig.Configure(
+		prefs.StringWithFallback(prefFlrigHost, "127.0.0.1"),
+		prefs.IntWithFallback(prefFlrigPort, 12345),
+		prefs.StringWithFallback(prefFlrigDirection, "sdr-to-rig"),
+		prefs.BoolWithFallback(prefFlrigEnabled, false),
+	)
+	ui.flrig.Start()
+
+	return ui
 }
 
 func (u *appUI) build() fyne.CanvasObject {
@@ -193,6 +236,7 @@ func (u *appUI) build() fyne.CanvasObject {
 
 	u.helpBtn = widget.NewButton("?", u.showHelpDialog)
 	u.audioTuneBtn = widget.NewButton("Audio Client…", u.showAudioClientDialog)
+	u.flrigBtn = widget.NewButton("flrig…", u.showFlrigDialog)
 	u.startupCmdsBtn = widget.NewButton("Commands…", u.showStartupCmdsDialog)
 
 	connectRow := container.NewHBox(
@@ -203,6 +247,7 @@ func (u *appUI) build() fyne.CanvasObject {
 		u.connectBtn,
 		layout.NewSpacer(),
 		u.helpBtn,
+		u.flrigBtn,
 		u.audioTuneBtn,
 		u.startupCmdsBtn,
 	)
@@ -212,29 +257,32 @@ func (u *appUI) build() fyne.CanvasObject {
 	// ── Terminal / spot stream (fills the window) ──────────────────────────
 	u.term = newTerminalView()
 
-	// Wire double-tap: parse the spot line and tune the audio client if enabled.
+	// Wire double-tap: parse the spot line, tune the audio client if enabled,
+	// and push to flrig if enabled.
 	u.term.onDoubleTap = func(line string) {
-		if !u.prefs.BoolWithFallback(prefAudioEnabled, false) {
-			return
-		}
 		freqHz, mode, ok := ParseSpotLine(line)
 		if !ok {
 			return // digital spot or non-spot line — do nothing
 		}
-		host := u.prefs.StringWithFallback(prefAudioHost, defaultAudioHost)
-		port := u.prefs.StringWithFallback(prefAudioPort, defaultAudioPort)
-		baseURL := AudioClientBaseURL(host, port)
-		go func() {
-			err := TuneAudioClient(baseURL, freqHz, mode)
-			fyne.Do(func() {
-				if err != nil {
-					u.setAudioStatus("⚠ "+err.Error(), false)
-				} else {
-					u.setAudioStatus(fmt.Sprintf("⇒ %.1f kHz %s",
-						float64(freqHz)/1000.0, strings.ToUpper(mode)), true)
-				}
-			})
-		}()
+		// Audio client path.
+		if u.prefs.BoolWithFallback(prefAudioEnabled, false) {
+			host := u.prefs.StringWithFallback(prefAudioHost, defaultAudioHost)
+			port := u.prefs.StringWithFallback(prefAudioPort, defaultAudioPort)
+			baseURL := AudioClientBaseURL(host, port)
+			go func() {
+				err := TuneAudioClient(baseURL, freqHz, mode)
+				fyne.Do(func() {
+					if err != nil {
+						u.setAudioStatus("⚠ "+err.Error(), false)
+					} else {
+						u.setAudioStatus(fmt.Sprintf("⇒ %.1f kHz %s",
+							float64(freqHz)/1000.0, strings.ToUpper(mode)), true)
+					}
+				})
+			}()
+		}
+		// flrig path — PushSDRState is a no-op when disabled or not connected.
+		u.flrig.PushSDRState(freqHz, mode)
 	}
 
 	// Wire secondary-tap (right-click): show a context menu for the spot line.
@@ -266,12 +314,14 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.statusLabel = widget.NewLabel("")
 	u.telnetLabel = widget.NewLabel("")
 	u.audioLabel = widget.NewLabel("")
+	u.flrigLabel = widget.NewLabel("")
 	// Wrap the dot in a Centre container so it aligns vertically with the
 	// label text regardless of the row height chosen by HBox.
 	statusRow := container.NewHBox(
 		container.NewCenter(u.connDotBox),
 		u.statusLabel,
 		layout.NewSpacer(),
+		u.flrigLabel,
 		u.audioLabel,
 		u.telnetLabel,
 	)
@@ -1336,6 +1386,126 @@ func (u *appUI) showAudioClientDialog() {
 	u.win.Canvas().Focus(hostEntry)
 }
 
+// showFlrigDialog opens a modal that lets the user configure flrig XML-RPC sync.
+// When enabled, double-clicking a spot line pushes the frequency and mode to
+// flrig (sdr-to-rig), or flrig changes update the status bar (rig-to-sdr), or
+// both directions are active simultaneously.
+func (u *appUI) showFlrigDialog() {
+	enabledCheck := widget.NewCheck("Enable flrig frequency/mode sync", nil)
+	enabledCheck.SetChecked(u.prefs.BoolWithFallback(prefFlrigEnabled, false))
+
+	hostEntry := widget.NewEntry()
+	hostEntry.SetPlaceHolder("127.0.0.1")
+	hostEntry.SetText(u.prefs.StringWithFallback(prefFlrigHost, "127.0.0.1"))
+
+	portEntry := widget.NewEntry()
+	portEntry.SetPlaceHolder("12345")
+	portEntry.SetText(strconv.Itoa(u.prefs.IntWithFallback(prefFlrigPort, 12345)))
+
+	dirSelect := widget.NewSelect(
+		[]string{"sdr-to-rig", "rig-to-sdr", "both"},
+		nil,
+	)
+	dirSelect.SetSelected(u.prefs.StringWithFallback(prefFlrigDirection, "sdr-to-rig"))
+
+	form := widget.NewForm(
+		widget.NewFormItem("Host", hostEntry),
+		widget.NewFormItem("Port", portEntry),
+		widget.NewFormItem("Direction", dirSelect),
+	)
+
+	// Test button: attempts system.listMethods against the host/port currently
+	// typed in the form (not the saved prefs) to verify connectivity.
+	testResult := widget.NewLabel("")
+	testResult.Wrapping = fyne.TextWrapWord
+	var testBtn *widget.Button
+	testBtn = widget.NewButton("Test Connection", func() {
+		host := strings.TrimSpace(hostEntry.Text)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		portStr := strings.TrimSpace(portEntry.Text)
+		port := 12345
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
+			port = p
+		}
+		testBtn.Disable()
+		testResult.Importance = widget.MediumImportance
+		testResult.SetText(fmt.Sprintf("Testing %s:%d…", host, port))
+		go func() {
+			// Use a one-shot FlrigSync just for the connection test.
+			probe := NewFlrigSync()
+			probe.Configure(host, port, "sdr-to-rig", true)
+			probe.Start()
+			// Give it one reconnect attempt (tryConnect runs immediately).
+			time.Sleep(500 * time.Millisecond)
+			connected := probe.IsConnected()
+			probe.Stop()
+			fyne.Do(func() {
+				testBtn.Enable()
+				if connected {
+					testResult.Importance = widget.SuccessImportance
+					testResult.SetText("✓ Connected to flrig.")
+				} else {
+					testResult.Importance = widget.DangerImportance
+					testResult.SetText("✗ Cannot reach flrig. Check that flrig is running and the host/port are correct.")
+				}
+			})
+		}()
+	})
+
+	dirHelp := widget.NewLabelWithStyle(
+		"sdr-to-rig: spot double-click → flrig\nrig-to-sdr: flrig tunes → shown in status bar\nboth: bidirectional with echo prevention",
+		fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+	dirHelp.Wrapping = fyne.TextWrapWord
+
+	body := container.NewVBox(
+		enabledCheck,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle(
+			"flrig XML-RPC address (default: 127.0.0.1:12345):",
+			fyne.TextAlignLeading, fyne.TextStyle{}),
+		form,
+		dirHelp,
+		widget.NewSeparator(),
+		container.NewHBox(testBtn),
+		widget.NewSeparator(),
+		testResult,
+	)
+	content := container.NewBorder(body, nil, nil, nil)
+
+	d := dialog.NewCustomConfirm("flrig Sync", "Save", "Cancel", content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			host := strings.TrimSpace(hostEntry.Text)
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			portStr := strings.TrimSpace(portEntry.Text)
+			port := 12345
+			if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
+				port = p
+			}
+			dir := dirSelect.Selected
+			if dir == "" {
+				dir = "sdr-to-rig"
+			}
+			enabled := enabledCheck.Checked
+
+			u.prefs.SetBool(prefFlrigEnabled, enabled)
+			u.prefs.SetString(prefFlrigHost, host)
+			u.prefs.SetInt(prefFlrigPort, port)
+			u.prefs.SetString(prefFlrigDirection, dir)
+
+			u.flrig.Configure(host, port, dir, enabled)
+		}, u.win)
+	d.Resize(fyne.NewSize(480, 400))
+	d.Show()
+	u.win.Canvas().Focus(hostEntry)
+}
+
 // resetPreferences clears all saved preferences via the Fyne API and reloads
 // the UI fields to their defaults. Works on all platforms without any
 // file-path logic.
@@ -1344,6 +1514,7 @@ func (u *appUI) resetPreferences() {
 		prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds,
 		prefAutoConnectLocalCallsign, prefAutoConnectLocalAddr,
 		prefAudioEnabled, prefAudioHost, prefAudioPort, prefAudioAutoConnect,
+		prefFlrigEnabled, prefFlrigHost, prefFlrigPort, prefFlrigDirection,
 	} {
 		u.prefs.RemoveValue(key)
 	}
@@ -1351,6 +1522,8 @@ func (u *appUI) resetPreferences() {
 	u.callsign.SetText("")
 	u.portEntry.SetText(defaultTelnetPort)
 	u.refreshAutoCheck()
+	// Disable flrig sync so it stops trying to connect after a reset.
+	u.flrig.Configure("127.0.0.1", 12345, "sdr-to-rig", false)
 }
 
 // sendCommand forwards the GUI input line to the DX cluster session, echoing
@@ -1604,6 +1777,10 @@ func (u *appUI) disconnect() {
 		u.listener.Stop()
 		u.listener = nil
 	}
+	// Stop the flrig sync engine. It will be restarted (if enabled) the next
+	// time the user connects, or it can be left running for rig-to-sdr use.
+	// We call Stop here only when the window is closing (called from SetOnClosed);
+	// during a normal disconnect we leave it running so the rig stays in sync.
 	u.connectBtn.SetText("Connect")
 	u.setControlsEnabled(true)
 	u.setInputEnabled(false)
@@ -1611,6 +1788,13 @@ func (u *appUI) disconnect() {
 	u.telnetLabel.SetText("")
 	u.setStatus("Disconnected")
 	u.setConnDot(false)
+}
+
+// stopFlrig shuts down the flrig sync engine. Called when the window closes.
+func (u *appUI) stopFlrig() {
+	if u.flrig != nil {
+		u.flrig.Stop()
+	}
 }
 
 func (u *appUI) isConnected() bool { return u.client.Load() != nil }
