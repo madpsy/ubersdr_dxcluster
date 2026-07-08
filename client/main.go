@@ -200,7 +200,9 @@ func (u *appUI) build() fyne.CanvasObject {
 	// ── Status bar ─────────────────────────────────────────────────────────
 	u.statusLabel = widget.NewLabel("")
 	u.telnetLabel = widget.NewLabel("")
-	statusRow := container.NewHBox(u.connDotBox, u.statusLabel, layout.NewSpacer(), u.telnetLabel)
+	// Wrap the dot in a Centre container so it aligns vertically with the
+	// label text regardless of the row height chosen by HBox.
+	statusRow := container.NewHBox(container.NewCenter(u.connDotBox), u.statusLabel, layout.NewSpacer(), u.telnetLabel)
 	bottom := container.NewVBox(widget.NewSeparator(), statusRow)
 
 	// Wire up the initial (unlocked) OnChanged handlers for callsign and port.
