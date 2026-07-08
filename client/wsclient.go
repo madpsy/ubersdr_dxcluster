@@ -36,8 +36,9 @@ type DXClusterClient struct {
 	url      string
 	callsign string
 
-	onText   func(string)       // every chunk of server text
-	onStatus func(string, bool) // human status message, connected?
+	onText     func(string)       // every chunk of server text
+	onStatus   func(string, bool) // human status message, connected?
+	onLoggedIn func()             // called once after callsign is sent (login complete)
 
 	mu      sync.Mutex
 	conn    *websocket.Conn
@@ -58,6 +59,14 @@ func NewDXClusterClient(url, callsign string, onText func(string), onStatus func
 		onText:   onText,
 		onStatus: onStatus,
 	}
+}
+
+// SetOnLoggedIn registers a callback that is invoked once per session,
+// immediately after the callsign is sent to the server (login complete).
+// It is called from the client's read goroutine; any UI work must be
+// marshalled onto the UI thread by the caller.
+func (c *DXClusterClient) SetOnLoggedIn(fn func()) {
+	c.onLoggedIn = fn
 }
 
 // Start begins connecting in the background. It is safe to call once.
@@ -193,6 +202,9 @@ func (c *DXClusterClient) connectOnce() (bool, error) {
 		if !callsignSent && strings.Contains(strings.ToLower(text), "callsign") {
 			callsignSent = true
 			_ = c.sendRaw(c.callsign + "\r\n")
+			if c.onLoggedIn != nil {
+				go c.onLoggedIn()
+			}
 		}
 
 		if c.onText != nil {

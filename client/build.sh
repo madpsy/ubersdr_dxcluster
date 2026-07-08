@@ -21,6 +21,14 @@ MINGW_WINDRES="x86_64-w64-mingw32-windres"
 
 mkdir -p "$DIST"
 
+# ── Copy helptext.go from the server ─────────────────────────────────────────
+# helptext.go lives in the server package and contains the helpText constant
+# used by the HELP command, the web UI, and the desktop client help dialog.
+# Copying it here makes it part of the client build (same package main).
+# The copy is gitignored and regenerated on every build.
+echo "==> Copying ../helptext.go → helptext.go…"
+cp ../helptext.go helptext.go
+
 build_linux() {
   echo "==> Building Linux amd64…"
   CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \

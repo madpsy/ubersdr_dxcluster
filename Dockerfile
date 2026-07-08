@@ -18,6 +18,8 @@ WORKDIR /src/client
 COPY client/go.mod client/go.sum ./
 RUN go mod download
 COPY client/ ./
+# helptext.go lives at the repo root; build.sh copies it into the client dir.
+COPY helptext.go /src/helptext.go
 # Produces dist/ubersdr-dxcluster-client-{linux-amd64,windows-amd64.exe}
 RUN chmod +x build.sh && ./build.sh
 

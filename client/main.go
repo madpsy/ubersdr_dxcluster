@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -39,6 +40,7 @@ const (
 	prefCallsign    = "callsign"
 	prefTelnetPort  = "telnet_port"
 	prefAutoConnect = "auto_connect_uuid" // instance UUID to auto-connect on startup, or ""
+	prefStartupCmds = "startup_commands"  // newline-separated commands sent after login
 )
 
 func main() {
@@ -75,17 +77,19 @@ type appUI struct {
 	client   atomic.Pointer[DXClusterClient]
 	listener *TelnetListener
 
-	instanceLabel *widget.Label
-	callsign      *widget.Entry
-	portEntry     *widget.Entry
-	connectBtn    *widget.Button
-	chooseBtn     *widget.Button
-	autoCheck     *widget.Check
-	inputEntry    *widget.Entry
-	sendBtn       *widget.Button
-	statusLabel   *widget.Label
-	telnetLabel   *widget.Label
-	term          *terminalView
+	instanceLabel  *widget.Label
+	callsign       *widget.Entry
+	portEntry      *widget.Entry
+	connectBtn     *widget.Button
+	chooseBtn      *widget.Button
+	autoCheck      *widget.Check
+	helpBtn        *widget.Button
+	startupCmdsBtn *widget.Button
+	inputEntry     *widget.Entry
+	sendBtn        *widget.Button
+	statusLabel    *widget.Label
+	telnetLabel    *widget.Label
+	term           *terminalView
 
 	headers []string
 }
@@ -110,7 +114,9 @@ func (u *appUI) build() fyne.CanvasObject {
 		if checked {
 			u.saveAutoConnect(u.current)
 		} else {
-			u.prefs.SetString(prefAutoConnect, "")
+			// Write "none" (not "") so we can distinguish "user explicitly
+			// disabled" from "never configured" on the next launch.
+			u.prefs.SetString(prefAutoConnect, "none")
 		}
 	})
 	u.autoCheck.Disable() // enabled once an instance is chosen
@@ -144,12 +150,18 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.connectBtn = widget.NewButton("Connect", u.onConnect)
 	u.connectBtn.Importance = widget.HighImportance
 
+	u.helpBtn = widget.NewButton("?", u.showHelpDialog)
+	u.startupCmdsBtn = widget.NewButton("Commands…", u.showStartupCmdsDialog)
+
 	connectRow := container.NewHBox(
 		widget.NewLabel("Callsign:"),
 		container.NewGridWrap(fyne.NewSize(160, 37), u.callsign),
 		widget.NewLabel("Telnet port:"),
 		container.NewGridWrap(fyne.NewSize(90, 37), u.portEntry),
 		u.connectBtn,
+		layout.NewSpacer(),
+		u.helpBtn,
+		u.startupCmdsBtn,
 	)
 
 	toolbar := container.NewVBox(instanceRow, connectRow, widget.NewSeparator())
@@ -214,27 +226,47 @@ func (u *appUI) refresh() {
 //     "dxcluster_m9psy.exe"), connect to the matching instance.
 //  3. Otherwise, open the instance picker.
 func (u *appUI) doStartup() {
-	if uuid := u.loadAutoConnect(); uuid != "" {
+	saved := u.prefs.String(prefAutoConnect)
+
+	switch {
+	case saved == "none":
+		// User explicitly unchecked auto-connect — respect that choice.
+		// Still open the picker so they can connect manually.
+		if len(u.instances) > 0 {
+			u.showInstancePicker()
+		}
+		return
+
+	case saved != "":
+		// A UUID was previously saved — try to connect to that instance.
 		if strings.TrimSpace(u.callsign.Text) != "" {
-			if inst := instanceByID(u.instances, uuid); inst != nil {
+			if inst := instanceByID(u.instances, saved); inst != nil {
 				u.setStatus("Auto-connecting to " + inst.Name + "…")
 				u.chooseInstance(*inst)
 				return
 			}
 			u.setStatus("Saved startup instance is not currently online — choose one")
 		}
-		// A saved preference exists: honour it (or fall back to the picker) but
-		// never let the filename override the user's explicit choice.
+		// Preference exists but instance is offline or callsign missing:
+		// open the picker rather than letting the filename override the
+		// user's explicit choice.
 		if len(u.instances) > 0 {
 			u.showInstancePicker()
 		}
 		return
 	}
 
+	// saved == "" → never configured; check for a filename-encoded callsign.
 	if cs := executableCallsign(); cs != "" {
 		if inst := instanceByCallsign(u.instances, cs); inst != nil {
 			u.setStatus("Connecting to " + inst.Callsign + " (from program name)…")
 			u.chooseInstance(*inst)
+			// First launch with a filename callsign: automatically enable
+			// auto-connect so the user doesn't have to tick it manually.
+			// They can uncheck it at any time; that writes "none" and this
+			// branch will not run again.
+			u.saveAutoConnect(inst)
+			u.refreshAutoCheck()
 			return
 		}
 		// Named for a callsign that isn't online right now — fall through.
@@ -559,7 +591,7 @@ func (u *appUI) newListener(port int) *TelnetListener {
 
 // newClient builds a WebSocket client bound to the given (persistent) listener.
 func (u *appUI) newClient(inst Instance, call string, listener *TelnetListener) *DXClusterClient {
-	return NewDXClusterClient(inst.TerminalWSURL(), call,
+	c := NewDXClusterClient(inst.TerminalWSURL(), call,
 		func(text string) { // server output
 			u.term.append(text)
 			if listener != nil {
@@ -570,6 +602,121 @@ func (u *appUI) newClient(inst Instance, call string, listener *TelnetListener) 
 			fyne.Do(func() { u.setStatus(msg) })
 		},
 	)
+	c.SetOnLoggedIn(func() {
+		u.sendStartupCommands(c)
+	})
+	return c
+}
+
+// sendStartupCommands sends each non-empty line from the startup commands
+// preference to the server, 50 ms apart, in a background goroutine.
+func (u *appUI) sendStartupCommands(c *DXClusterClient) {
+	raw := u.prefs.String(prefStartupCmds)
+	if raw == "" {
+		return
+	}
+	var cmds []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			cmds = append(cmds, line)
+		}
+	}
+	if len(cmds) == 0 {
+		return
+	}
+	go func() {
+		for _, cmd := range cmds {
+			_ = c.Send(cmd)
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+}
+
+// showStartupCmdsDialog opens a modal that lets the user edit the list of
+// commands sent automatically after login. One command per line.
+func (u *appUI) showStartupCmdsDialog() {
+	entry := widget.NewMultiLineEntry()
+	entry.SetPlaceHolder("One command per line, e.g.:\nset/digital\nset/rbn\nset/filter band 20m")
+	entry.SetText(u.prefs.String(prefStartupCmds))
+	entry.Wrapping = fyne.TextWrapOff
+
+	content := container.NewBorder(
+		widget.NewLabelWithStyle(
+			"Commands sent automatically after login (one per line):",
+			fyne.TextAlignLeading, fyne.TextStyle{}),
+		nil, nil, nil,
+		container.NewScroll(entry),
+	)
+
+	d := dialog.NewCustomConfirm("Startup Commands", "Save", "Cancel", content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			u.prefs.SetString(prefStartupCmds, entry.Text)
+		}, u.win)
+	d.Resize(fyne.NewSize(520, 340))
+	d.Show()
+	u.win.Canvas().Focus(entry)
+}
+
+// showHelpDialog opens a modal explaining what the client does and how to use
+// it, mirroring the web UI's "Desktop DX Cluster Client" info modal.
+// The full telnet command reference (from helpText, copied from the server's
+// helptext.go at build time) is shown in a scrollable monospace pane between
+// the intro text and the Reset Preferences button at the bottom.
+func (u *appUI) showHelpDialog() {
+	intro := widget.NewRichTextFromMarkdown(`**UberSDR Desktop DX Cluster Client**
+
+When you run this client it connects to the chosen UberSDR DX Cluster instance over a secure WebSocket and listens on **port 7300** (configurable) on your local machine.
+
+You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favourite logging software (Log4OM, DXKeeper, N1MM+, etc.) to receive the live spot stream. Other machines on your local network can also connect using this machine's IP address on port 7300, if your firewall allows.
+
+**Auto-connect:** if this program's filename contains an instance callsign (e.g. ` + "`dxcluster_m0abc`" + ` or ` + "`dxcluster_m0abc.exe`" + `), it will connect to that instance automatically on first launch and tick the *Auto-connect on startup* checkbox for you.
+
+**Startup Commands:** use the *Commands…* button to enter commands sent automatically after login — one per line (e.g. ` + "`set/digital`" + `, ` + "`set/filter band 20m`" + `).`)
+	intro.Wrapping = fyne.TextWrapWord
+
+	cmdRef := widget.NewLabel(helpText)
+	cmdRef.TextStyle = fyne.TextStyle{Monospace: true}
+	cmdRef.Wrapping = fyne.TextWrapOff
+
+	resetBtn := widget.NewButton("Reset All Preferences…", func() {
+		dialog.ShowConfirm("Reset Preferences",
+			"This will clear your saved callsign, port, auto-connect setting and startup commands.\n\nContinue?",
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				u.resetPreferences()
+			}, u.win)
+	})
+	resetBtn.Importance = widget.DangerImportance
+
+	content := container.NewBorder(
+		intro,
+		container.NewVBox(widget.NewSeparator(), resetBtn),
+		nil, nil,
+		container.NewScroll(cmdRef),
+	)
+
+	d := dialog.NewCustom("About this Client", "Close", content, u.win)
+	d.Resize(fyne.NewSize(700, 600))
+	d.Show()
+}
+
+// resetPreferences clears all saved preferences via the Fyne API and reloads
+// the UI fields to their defaults. Works on all platforms without any
+// file-path logic.
+func (u *appUI) resetPreferences() {
+	for _, key := range []string{prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds} {
+		u.prefs.RemoveValue(key)
+	}
+	// Reload UI fields to defaults.
+	u.callsign.SetText("")
+	u.portEntry.SetText(defaultTelnetPort)
+	u.refreshAutoCheck()
 }
 
 // sendCommand forwards the GUI input line to the DX cluster session, echoing

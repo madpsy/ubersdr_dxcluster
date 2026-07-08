@@ -206,10 +206,32 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 	fmt.Fprintf(conn, "Streaming live Digital, CW, Voice and DX Cluster spots from UberSDR.\r\n\r\n")
 
 	if t.requireLogin {
+		// Start a 15-second login timer. If the client does not supply a valid
+		// callsign within that window the timer goroutine sends a timeout
+		// message and closes the connection, which causes loginScanner.Scan()
+		// to return false and handleConn to return.
+		// The timer is stopped immediately on successful login so it never
+		// fires for well-behaved clients.
+		loginDone := make(chan struct{})
+		loginTimer := time.AfterFunc(15*time.Second, func() {
+			select {
+			case <-loginDone:
+				return // login already completed
+			default:
+			}
+			log.Printf("[telnet] login timeout from %s", remote)
+			fmt.Fprintf(conn, "\r\nLogin timeout. Disconnecting.\r\n")
+			conn.Close()
+		})
+
 		fmt.Fprintf(conn, "Please enter your callsign: ")
 		loginScanner := bufio.NewScanner(conn)
-		if !loginScanner.Scan() {
-			return // connection closed before login
+		loggedIn := loginScanner.Scan()
+		loginTimer.Stop()
+		close(loginDone)
+
+		if !loggedIn {
+			return // connection closed (by timeout or client)
 		}
 		input := strings.TrimSpace(loginScanner.Text())
 		call := strings.ToUpper(input)

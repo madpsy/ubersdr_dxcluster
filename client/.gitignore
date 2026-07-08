@@ -3,3 +3,5 @@
 ubersdr-dxcluster-client
 *.exe
 *.syso
+# Copied from server at build time by build.sh — do not commit
+helptext.go
