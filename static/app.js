@@ -1060,6 +1060,23 @@ function showSpotMenu(e, d) {
   if (y + mh > vh - 8) y = vh - mh - 8;
   menu.style.left = x + 'px';
   menu.style.top  = y + 'px';
+
+  // Flip submenus upward when the parent item is near the bottom of the viewport
+  menu.querySelectorAll('.ctx-item-submenu').forEach(function(wrap) {
+    wrap.addEventListener('mouseenter', function() {
+      wrap.classList.remove('flip-up');
+      const sub = wrap.querySelector('.ctx-submenu');
+      if (!sub) return;
+      // Temporarily show to measure height
+      sub.style.display = 'block';
+      const rect = wrap.getBoundingClientRect();
+      const subH = sub.offsetHeight || 120;
+      sub.style.display = '';
+      if (rect.bottom + subH > window.innerHeight - 8) {
+        wrap.classList.add('flip-up');
+      }
+    });
+  });
 }
 
 /** Handle contextmenu event on a spot tbody. */

@@ -642,6 +642,7 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
   display: none;
   position: absolute;
   top: -4px;
+  bottom: auto;
   left: 100%;
   margin-left: 2px;
   background: var(--surface);
@@ -652,7 +653,11 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
   min-width: 160px;
   z-index: 901;
 }
-/* Flip submenu to the left if it would overflow the right edge */
+/* Flip submenu upward when parent item is near the bottom of the viewport */
+.ctx-item-submenu.flip-up > .ctx-submenu {
+  top: auto;
+  bottom: -4px;
+}
 .ctx-item-submenu:hover > .ctx-submenu {
   display: block;
 }

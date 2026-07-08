@@ -75,6 +75,8 @@
 
   // ── Connection ─────────────────────────────────────────────────────────────
 
+  const LS_CALLSIGN_KEY = 'ubersdr_terminal_callsign';
+
   function connect() {
     if (ws) return;
 
@@ -84,6 +86,8 @@
       if (callsignInput) callsignInput.focus();
       return;
     }
+    // Persist callsign so it auto-populates next time
+    try { localStorage.setItem(LS_CALLSIGN_KEY, callsign); } catch (_) {}
     pendingCallsign = callsign;
     callsignSent = false;
 
@@ -159,6 +163,13 @@
   function openModal() {
     if (overlay) {
       overlay.style.display = 'flex';
+      // Restore saved callsign if the field is empty
+      if (callsignInput && !callsignInput.value.trim()) {
+        try {
+          const saved = localStorage.getItem(LS_CALLSIGN_KEY);
+          if (saved) callsignInput.value = saved;
+        } catch (_) {}
+      }
       // Scroll output to bottom so the latest content is visible on re-open
       if (output) output.scrollTop = output.scrollHeight;
       if (!connected && callsignInput) callsignInput.focus();
@@ -240,20 +251,46 @@
 
   /**
    * Send a command via the terminal, opening the modal first if needed.
-   * If not connected, opens the modal and pre-fills the input so the user
-   * can connect and send manually.
+   * If not connected but a callsign is saved in localStorage, auto-connects
+   * and sends the command once the session handshake completes.
+   * If no callsign is saved, opens the modal and lets the user connect manually.
    * @param {string} cmd
    */
   window.termSendCommand = function(cmd) {
     openModal();
     if (connected && ws) {
-      // Echo locally and send
+      // Already connected — echo locally and send immediately
       appendOutput('> ' + cmd + '\n');
       ws.send(cmd + '\r\n');
     } else {
-      // Not connected — pre-fill the input so the user can connect first
-      if (input) { input.value = cmd; }
-      if (callsignInput) callsignInput.focus();
+      // Not connected — try to auto-connect if we have a saved callsign,
+      // then send the command once the session is established.
+      const savedCall = (() => {
+        try { return localStorage.getItem(LS_CALLSIGN_KEY) || ''; } catch (_) { return ''; }
+      })();
+      if (savedCall) {
+        // Populate the callsign field and kick off a connection
+        if (callsignInput) callsignInput.value = savedCall;
+        // connect() creates ws synchronously; hook onopen before it fires
+        connect();
+        if (ws) {
+          const prevOnOpen = ws.onopen;
+          ws.onopen = function(evt) {
+            if (prevOnOpen) prevOnOpen.call(ws, evt);
+            // Wait for the callsign handshake to complete before sending
+            setTimeout(function() {
+              if (connected && ws) {
+                appendOutput('> ' + cmd + '\n');
+                ws.send(cmd + '\r\n');
+              }
+            }, 800);
+          };
+        }
+      } else {
+        // No saved callsign — pre-fill the command input and let the user connect manually
+        if (input) { input.value = cmd; }
+        if (callsignInput) callsignInput.focus();
+      }
     }
   };
 
