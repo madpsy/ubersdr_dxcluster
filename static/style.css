@@ -600,3 +600,65 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 }
 .download-client-btn:hover  { opacity: 0.9; }
 .download-client-btn:active { transform: translateY(1px); }
+
+/* ── Spot right-click context menu ── */
+.spot-ctx-menu {
+  position: fixed;
+  z-index: 900;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  padding: 4px 0;
+  min-width: 210px;
+  font-size: 12px;
+  user-select: none;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 14px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  gap: 6px;
+  transition: background 0.1s;
+}
+.ctx-item:hover { background: rgba(56,189,248,0.10); color: var(--blue); }
+
+.ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}
+
+/* Submenu wrapper */
+.ctx-item-submenu {
+  position: relative;
+}
+.ctx-item-submenu > .ctx-submenu {
+  display: none;
+  position: absolute;
+  top: -4px;
+  left: 100%;
+  margin-left: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 901;
+}
+/* Flip submenu to the left if it would overflow the right edge */
+.ctx-item-submenu:hover > .ctx-submenu {
+  display: block;
+}
+.ctx-arrow {
+  font-size: 9px;
+  color: var(--muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}

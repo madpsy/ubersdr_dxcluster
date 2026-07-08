@@ -175,6 +175,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Periodically age out stale voice entries
   setInterval(pruneVoice, 30_000);
+
+  // Wire right-click context menu on all spot tables
+  [tbodyDecoder, tbodyCW, tbodyVoice, tbodyDX, tbodyAll].forEach(tbody => {
+    if (!tbody) return;
+    tbody.addEventListener('contextmenu', onSpotContextMenu);
+  });
 });
 
 // ── SSE connection ─────────────────────────────────────────────────────────
@@ -378,11 +384,12 @@ function onAllSpot(spot, live) {
 
   // Store filter-relevant data as attributes
   tr.dataset.stream  = spot.stream        || '';
-  tr.dataset.band    = spot.band || '';
+  tr.dataset.band    = spot.band          || '';
   tr.dataset.mode    = mode;
   tr.dataset.cont    = spot.continent     || '';
   tr.dataset.country = spot.country_code  || '';
   tr.dataset.call    = spot.callsign      || '';
+  tr.dataset.freq    = spot.freq_hz       || '';
   tr.dataset.snr     = isNaN(spot.snr) ? '' : String(spot.snr);
 
   tr.innerHTML =
@@ -447,6 +454,15 @@ function buildRow(fields) {
   const country = fields.country ? flag + esc(fields.country) : '\u2014';
 
   const tr = document.createElement('tr');
+
+  // Store spot data as attributes for context menu
+  tr.dataset.call    = fields.callsign_raw || '';
+  tr.dataset.freq    = fields.freq_hz      || '';
+  tr.dataset.band    = fields.band         || '';
+  tr.dataset.mode    = fields.mode         || '';
+  tr.dataset.country = fields.country_code || '';
+  tr.dataset.snr     = isNaN(fields.snr) ? '' : String(fields.snr);
+
   tr.innerHTML =
     '<td class="ts-col">'      + fmtUTC(fields.ts)              + '</td>' +
     '<td class="call-col">'    + (fields.callsign || '\u2014')   + '</td>' +
@@ -624,15 +640,16 @@ function onDecoder(spot, live) {
     : (fmtDist(spot.distance_km) || '\u2014');
 
   const tr = buildRow({
-    ts:           spot.timestamp,
-    callsign:     esc(spot.callsign),
-    freq_hz:      spot.freq_hz,
-    band:         spot.band,
-    mode:         spot.mode,
-    snr:          spot.snr,
-    country:      spot.country,
-    country_code: spot.country_code,
-    info:         info,
+    ts:            spot.timestamp,
+    callsign:      esc(spot.callsign),
+    callsign_raw:  spot.callsign || '',
+    freq_hz:       spot.freq_hz,
+    band:          spot.band,
+    mode:          spot.mode,
+    snr:           spot.snr,
+    country:       spot.country,
+    country_code:  spot.country_code,
+    info:          info,
   });
   if (live) tr.className = 'new-row';
 
@@ -653,15 +670,16 @@ function onCW(spot, live) {
   const info    = [wpm, spotter].filter(Boolean).join(' ') || '\u2014';
 
   const tr = buildRow({
-    ts:           spot.timestamp,
-    callsign:     esc(spot.callsign),
-    freq_hz:      spot.freq_hz,
-    band:         spot.band,
-    mode:         'CW',
-    snr:          spot.snr,
-    country:      spot.country,
-    country_code: spot.country_code,
-    info:         info,
+    ts:            spot.timestamp,
+    callsign:      esc(spot.callsign),
+    callsign_raw:  spot.callsign || '',
+    freq_hz:       spot.freq_hz,
+    band:          spot.band,
+    mode:          'CW',
+    snr:           spot.snr,
+    country:       spot.country,
+    country_code:  spot.country_code,
+    info:          info,
   });
   if (live) tr.className = 'new-row-cw';
 
@@ -680,15 +698,16 @@ function onDXSpot(spot, live) {
   const info = spot.comment ? esc(spot.comment) : '\u2014';
 
   const tr = buildRow({
-    ts:           spot.timestamp,
-    callsign:     esc(spot.callsign),   // dx_call mapped to callsign in spot.go
-    freq_hz:      spot.freq_hz,
-    band:         spot.band,
-    mode:         '\u2014',             // DX spots don't carry mode
-    snr:          null,                 // no SNR for DX spots
-    country:      spot.country,
-    country_code: spot.country_code,
-    info:         info,
+    ts:            spot.timestamp,
+    callsign:      esc(spot.callsign),   // dx_call mapped to callsign in spot.go
+    callsign_raw:  spot.callsign || '',
+    freq_hz:       spot.freq_hz,
+    band:          spot.band,
+    mode:          '',                   // DX spots don't carry mode
+    snr:           null,                 // no SNR for DX spots
+    country:       spot.country,
+    country_code:  spot.country_code,
+    info:          info,
   });
 
   // Override the SNR cell with the spotter callsign instead
@@ -725,6 +744,14 @@ function onVoice(spot, live) {
 
 function updateVoiceRow(tr, spot, live) {
   if (live) tr.className = 'new-row-voice';
+
+  // Store spot data as attributes for context menu
+  tr.dataset.call    = spot.callsign      || '';
+  tr.dataset.freq    = spot.freq_hz       || '';
+  tr.dataset.band    = spot.band          || '';
+  tr.dataset.mode    = spot.voice_mode || spot.mode || '';
+  tr.dataset.country = spot.country_code  || '';
+  tr.dataset.snr     = isNaN(spot.snr) ? '' : String(spot.snr);
 
   // Callsign: dim N0CALL
   const callsign = spot.callsign === 'N0CALL'
@@ -797,3 +824,256 @@ function esc(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+// ── Spot context menu ───────────────────────────────────────────────────────
+
+let _ctxMenu = null;  // the menu element, created lazily
+
+/**
+ * Extract the callsign prefix (letters before the first digit, or first 1-2 chars).
+ * e.g. "G1TLH" → "G", "DL3ABC" → "DL", "VK2XYZ" → "VK"
+ */
+function callPrefix(call) {
+  if (!call) return '';
+  const m = call.match(/^([A-Z]+)/);
+  return m ? m[1] : call.slice(0, 2);
+}
+
+/**
+ * Send a command via the web terminal.
+ * Opens the terminal modal if it isn't already open, then sends the command.
+ * If the terminal isn't connected yet, pre-fills the input so the user can
+ * connect and send manually.
+ */
+function spotSendCommand(cmd) {
+  closeSpotMenu();
+  if (typeof window.termSendCommand === 'function') {
+    window.termSendCommand(cmd);
+  } else {
+    // Fallback: open terminal and pre-fill the input
+    if (typeof window.openTerminal === 'function') window.openTerminal();
+    const inp = document.getElementById('term-input');
+    if (inp) { inp.value = cmd; inp.focus(); }
+  }
+}
+
+/** Copy text to clipboard with a brief visual flash on the menu item. */
+function spotCopyText(text, label) {
+  closeSpotMenu();
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+/** Close and remove the context menu. */
+function closeSpotMenu() {
+  if (_ctxMenu) {
+    _ctxMenu.remove();
+    _ctxMenu = null;
+  }
+}
+
+/**
+ * Build and show the spot context menu at the mouse position.
+ * @param {MouseEvent} e
+ * @param {DOMStringMap} d  — tr.dataset
+ */
+function showSpotMenu(e, d) {
+  closeSpotMenu();
+
+  const call  = (d.call  || '').toUpperCase();
+  const freq  = d.freq   || '';
+  const band  = (d.band  || '').toLowerCase();
+  const mode  = (d.mode  || '').toUpperCase();
+  const pfx   = callPrefix(call);
+  const freqKHz = freq ? (parseFloat(freq) / 1000).toFixed(1) : '';
+
+  const menu = document.createElement('div');
+  menu.id = 'spot-ctx-menu';
+  menu.className = 'spot-ctx-menu';
+  _ctxMenu = menu;
+
+  /** Add a clickable menu item. */
+  function item(icon, label, action) {
+    const el = document.createElement('div');
+    el.className = 'ctx-item';
+    el.textContent = icon + '\u2002' + label;
+    el.addEventListener('click', action);
+    menu.appendChild(el);
+    return el;
+  }
+
+  /** Add a visual separator. */
+  function sep() {
+    const el = document.createElement('div');
+    el.className = 'ctx-sep';
+    menu.appendChild(el);
+  }
+
+  // ── Telnet commands ──────────────────────────────────────────────────────
+  let hasTelnet = false;
+
+  if (call) {
+    item('🔍', 'Show QRZ: ' + call,
+      () => spotSendCommand('show/qrz ' + call));
+    item('📡', 'Show DX: ' + call,
+      () => spotSendCommand('show/dx 20 call ' + call));
+    item('🧭', 'Show heading: ' + call,
+      () => spotSendCommand('show/heading ' + call));
+    if (pfx) {
+      item('🌐', 'Show DXCC: ' + pfx,
+        () => spotSendCommand('show/dxcc ' + pfx));
+      item('📋', 'Show prefix: ' + pfx,
+        () => spotSendCommand('show/prefix ' + pfx));
+    }
+    hasTelnet = true;
+  }
+
+  if (band) {
+    item('🌍', 'Show DX on ' + band,
+      () => spotSendCommand('show/dx 20 on ' + band));
+    hasTelnet = true;
+  }
+
+  if (hasTelnet) sep();
+
+  // ── Enable / Disable stream types ────────────────────────────────────────
+  const streamTypes = [
+    ['Digital', 'set/digital',    'unset/digital'],
+    ['CW/RBN',  'set/rbn',        'unset/rbn'],
+    ['Voice',   'set/voice',      'unset/voice'],
+    ['DX Cluster', 'set/dxcluster', 'unset/dxcluster'],
+  ];
+
+  const enableWrap  = document.createElement('div');
+  enableWrap.className  = 'ctx-item ctx-item-submenu';
+  const enableLabel = document.createElement('span');
+  enableLabel.textContent = '✅\u2002Enable';
+  enableWrap.appendChild(enableLabel);
+  const enableArrow = document.createElement('span');
+  enableArrow.className = 'ctx-arrow';
+  enableArrow.textContent = '▶';
+  enableWrap.appendChild(enableArrow);
+  const enableSub = document.createElement('div');
+  enableSub.className = 'ctx-submenu';
+  streamTypes.forEach(([label, onCmd]) => {
+    const el = document.createElement('div');
+    el.className = 'ctx-item';
+    el.textContent = label;
+    el.addEventListener('click', () => spotSendCommand(onCmd));
+    enableSub.appendChild(el);
+  });
+  enableWrap.appendChild(enableSub);
+  menu.appendChild(enableWrap);
+
+  const disableWrap  = document.createElement('div');
+  disableWrap.className  = 'ctx-item ctx-item-submenu';
+  const disableLabel = document.createElement('span');
+  disableLabel.textContent = '🔕\u2002Disable';
+  disableWrap.appendChild(disableLabel);
+  const disableArrow = document.createElement('span');
+  disableArrow.className = 'ctx-arrow';
+  disableArrow.textContent = '▶';
+  disableWrap.appendChild(disableArrow);
+  const disableSub = document.createElement('div');
+  disableSub.className = 'ctx-submenu';
+  streamTypes.forEach(([label, , offCmd]) => {
+    const el = document.createElement('div');
+    el.className = 'ctx-item';
+    el.textContent = label;
+    el.addEventListener('click', () => spotSendCommand(offCmd));
+    disableSub.appendChild(el);
+  });
+  disableWrap.appendChild(disableSub);
+  menu.appendChild(disableWrap);
+
+  sep();
+
+  // ── Filter shortcuts ─────────────────────────────────────────────────────
+  if (band) {
+    item('🔕', 'Reject this band (' + band + ')',
+      () => spotSendCommand('reject/spots 1 on ' + band));
+    item('✅', 'Accept only this band (' + band + ')',
+      () => spotSendCommand('accept/spots 1 on ' + band));
+    sep();
+  }
+
+  // ── Clipboard ────────────────────────────────────────────────────────────
+  if (call) {
+    item('📋', 'Copy callsign',
+      () => spotCopyText(call));
+  }
+  if (freqKHz) {
+    item('📋', 'Copy frequency (' + freqKHz + ' kHz)',
+      () => spotCopyText(freqKHz));
+  }
+
+  // ── Online submenu ───────────────────────────────────────────────────────
+  if (call) {
+    sep();
+    const onlineWrap = document.createElement('div');
+    onlineWrap.className = 'ctx-item ctx-item-submenu';
+
+    const onlineLabel = document.createElement('span');
+    onlineLabel.textContent = '🌐\u2002Online';
+    onlineWrap.appendChild(onlineLabel);
+
+    const arrow = document.createElement('span');
+    arrow.className = 'ctx-arrow';
+    arrow.textContent = '▶';
+    onlineWrap.appendChild(arrow);
+
+    const sub = document.createElement('div');
+    sub.className = 'ctx-submenu';
+
+    const links = [
+      ['QRZ.com',      'https://www.qrz.com/db/' + encodeURIComponent(call)],
+      ['PSKReporter',  'https://pskreporter.info/pskmap.html?callsign=' + encodeURIComponent(call)],
+      ['Clublog',      'https://clublog.org/logsearch/' + encodeURIComponent(call)],
+      ['DXHeat',       'https://dxheat.com/dxc/'],
+    ];
+    links.forEach(([label, url]) => {
+      const a = document.createElement('div');
+      a.className = 'ctx-item';
+      a.textContent = label;
+      a.addEventListener('click', () => {
+        closeSpotMenu();
+        window.open(url, '_blank', 'noopener');
+      });
+      sub.appendChild(a);
+    });
+
+    onlineWrap.appendChild(sub);
+    menu.appendChild(onlineWrap);
+  }
+
+  // ── Position and show ────────────────────────────────────────────────────
+  document.body.appendChild(menu);
+
+  // Clamp to viewport
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let x = e.clientX;
+  let y = e.clientY;
+  // Measure after append so we know the size
+  const mw = menu.offsetWidth  || 200;
+  const mh = menu.offsetHeight || 100;
+  if (x + mw > vw - 8) x = vw - mw - 8;
+  if (y + mh > vh - 8) y = vh - mh - 8;
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+}
+
+/** Handle contextmenu event on a spot tbody. */
+function onSpotContextMenu(e) {
+  const tr = e.target.closest('tr');
+  if (!tr || (!tr.dataset.call && !tr.dataset.freq)) return;  // placeholder rows
+  e.preventDefault();
+  showSpotMenu(e, tr.dataset);
+}
+
+// Close menu on any outside click or Escape
+document.addEventListener('click', function(e) {
+  if (_ctxMenu && !_ctxMenu.contains(e.target)) closeSpotMenu();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && _ctxMenu) closeSpotMenu();
+});

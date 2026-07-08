@@ -235,8 +235,27 @@
   }
 
   // Expose openModal globally so the header button can call it
-  window.openTerminal = openModal;
+  window.openTerminal  = openModal;
   window.closeTerminal = closeModal;
+
+  /**
+   * Send a command via the terminal, opening the modal first if needed.
+   * If not connected, opens the modal and pre-fills the input so the user
+   * can connect and send manually.
+   * @param {string} cmd
+   */
+  window.termSendCommand = function(cmd) {
+    openModal();
+    if (connected && ws) {
+      // Echo locally and send
+      appendOutput('> ' + cmd + '\n');
+      ws.send(cmd + '\r\n');
+    } else {
+      // Not connected — pre-fill the input so the user can connect first
+      if (input) { input.value = cmd; }
+      if (callsignInput) callsignInput.focus();
+    }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

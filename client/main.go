@@ -104,6 +104,7 @@ type appUI struct {
 	portEntry      *widget.Entry
 	connectBtn     *widget.Button
 	chooseBtn      *widget.Button
+	webBtn         *widget.Button
 	autoCheck      *widget.Check
 	helpBtn        *widget.Button
 	audioTuneBtn   *widget.Button
@@ -154,11 +155,19 @@ func (u *appUI) build() fyne.CanvasObject {
 	})
 	u.autoCheck.Disable() // enabled once an instance is chosen
 
+	u.webBtn = widget.NewButton("🌐 Web", func() {
+		if u.current != nil {
+			u.openURL(u.current.HTTPURL())
+		}
+	})
+	u.webBtn.Disable()
+
 	instanceRow := container.NewHBox(
 		u.chooseBtn,
 		widget.NewLabel("Instance:"),
 		u.instanceLabel,
 		layout.NewSpacer(),
+		u.webBtn,
 		u.autoCheck,
 	)
 
@@ -217,6 +226,15 @@ func (u *appUI) build() fyne.CanvasObject {
 				}
 			})
 		}()
+	}
+
+	// Wire secondary-tap (right-click): show a context menu for the spot line.
+	u.term.onSecondaryTap = func(line string, pos fyne.Position) {
+		call, freqKHz, band := parseSpotLineForMenu(line)
+		if call == "" && freqKHz == 0 {
+			return // not a spot line
+		}
+		u.showSpotContextMenu(call, freqKHz, band, pos)
 	}
 
 	termHeader := widget.NewLabelWithStyle(
@@ -781,9 +799,15 @@ func (u *appUI) refreshAutoCheck() {
 	if u.current == nil {
 		u.autoCheck.SetChecked(false)
 		u.autoCheck.Disable()
+		if u.webBtn != nil {
+			u.webBtn.Disable()
+		}
 		return
 	}
 	u.autoCheck.Enable()
+	if u.webBtn != nil {
+		u.webBtn.Enable()
+	}
 	saved := u.loadAutoConnect()
 	var checked bool
 	switch {
@@ -1330,6 +1354,229 @@ func (u *appUI) sendCommand() {
 	u.inputEntry.SetText("")
 }
 
+// spotSendCommand pre-fills the command input and sends it immediately if
+// connected, or just pre-fills it (ready to send) if not connected.
+// Must be called on the UI thread.
+func (u *appUI) spotSendCommand(cmd string) {
+	u.inputEntry.SetText(cmd)
+	c := u.client.Load()
+	if c == nil || !c.Connected() {
+		// Not connected — leave the command in the input box for the user.
+		u.win.Canvas().Focus(u.inputEntry)
+		return
+	}
+	u.sendCommand()
+}
+
+// showSpotContextMenu builds and shows a Fyne PopUpMenu at pos for the given
+// spot fields. call, freqKHz, band may be zero/empty if not available.
+// Must be called on the UI thread.
+func (u *appUI) showSpotContextMenu(call string, freqKHz float64, band string, pos fyne.Position) {
+	var items []*fyne.MenuItem
+
+	pfx := callPrefix(call)
+
+	// ── Telnet commands ──────────────────────────────────────────────────────
+	if call != "" {
+		items = append(items,
+			fyne.NewMenuItem("Show QRZ: "+call, func() {
+				u.spotSendCommand("show/qrz " + call)
+			}),
+			fyne.NewMenuItem("Show DX: "+call, func() {
+				u.spotSendCommand("show/dx 20 call " + call)
+			}),
+			fyne.NewMenuItem("Show heading: "+call, func() {
+				u.spotSendCommand("show/heading " + call)
+			}),
+		)
+		if pfx != "" {
+			items = append(items,
+				fyne.NewMenuItem("Show DXCC: "+pfx, func() {
+					u.spotSendCommand("show/dxcc " + pfx)
+				}),
+				fyne.NewMenuItem("Show prefix: "+pfx, func() {
+					u.spotSendCommand("show/prefix " + pfx)
+				}),
+			)
+		}
+	}
+	if band != "" {
+		items = append(items,
+			fyne.NewMenuItem("Show DX on "+band, func() {
+				u.spotSendCommand("show/dx 20 on " + band)
+			}),
+		)
+	}
+
+	// ── Enable / Disable stream types ────────────────────────────────────────
+	streamTypes := []struct{ label, setCmd, unsetCmd string }{
+		{"Digital", "set/digital", "unset/digital"},
+		{"CW/RBN", "set/rbn", "unset/rbn"},
+		{"Voice", "set/voice", "unset/voice"},
+		{"DX Cluster", "set/dxcluster", "unset/dxcluster"},
+	}
+	var enableItems, disableItems []*fyne.MenuItem
+	for _, st := range streamTypes {
+		st := st // capture
+		enableItems = append(enableItems, fyne.NewMenuItem(st.label, func() {
+			u.spotSendCommand(st.setCmd)
+		}))
+		disableItems = append(disableItems, fyne.NewMenuItem(st.label, func() {
+			u.spotSendCommand(st.unsetCmd)
+		}))
+	}
+	enableMenu := fyne.NewMenuItem("Enable", nil)
+	enableMenu.ChildMenu = fyne.NewMenu("", enableItems...)
+	disableMenu := fyne.NewMenuItem("Disable", nil)
+	disableMenu.ChildMenu = fyne.NewMenu("", disableItems...)
+	items = append(items, fyne.NewMenuItemSeparator(), enableMenu, disableMenu)
+
+	// ── Filter shortcuts ─────────────────────────────────────────────────────
+	if band != "" {
+		items = append(items, fyne.NewMenuItemSeparator())
+		bandCopy := band // capture for closures
+		items = append(items,
+			fyne.NewMenuItem("Reject this band ("+band+")", func() {
+				u.spotSendCommand("reject/spots 1 on " + bandCopy)
+			}),
+			fyne.NewMenuItem("Accept only this band ("+band+")", func() {
+				u.spotSendCommand("accept/spots 1 on " + bandCopy)
+			}),
+		)
+	}
+
+	// ── Clipboard ────────────────────────────────────────────────────────────
+	items = append(items, fyne.NewMenuItemSeparator())
+	if call != "" {
+		items = append(items,
+			fyne.NewMenuItem("Copy callsign", func() {
+				u.win.Clipboard().SetContent(call)
+			}),
+		)
+	}
+	if freqKHz > 0 {
+		freqStr := fmt.Sprintf("%.1f", freqKHz)
+		items = append(items,
+			fyne.NewMenuItem("Copy frequency ("+freqStr+" kHz)", func() {
+				u.win.Clipboard().SetContent(freqStr)
+			}),
+		)
+	}
+
+	// ── Online lookups ───────────────────────────────────────────────────────
+	if call != "" {
+		onlineItems := []*fyne.MenuItem{
+			fyne.NewMenuItem("QRZ.com", func() {
+				u.openURL("https://www.qrz.com/db/" + call)
+			}),
+			fyne.NewMenuItem("PSKReporter", func() {
+				u.openURL("https://pskreporter.info/pskmap.html?callsign=" + call)
+			}),
+			fyne.NewMenuItem("Clublog", func() {
+				u.openURL("https://clublog.org/logsearch/" + call)
+			}),
+			fyne.NewMenuItem("DXHeat", func() {
+				u.openURL("https://dxheat.com/dxc/")
+			}),
+		}
+		onlineMenu := fyne.NewMenuItem("Online", nil)
+		onlineMenu.ChildMenu = fyne.NewMenu("", onlineItems...)
+		items = append(items, fyne.NewMenuItemSeparator(), onlineMenu)
+	}
+
+	if len(items) == 0 {
+		return
+	}
+
+	menu := fyne.NewMenu("", items...)
+	widget.ShowPopUpMenuAtPosition(menu, u.win.Canvas(), pos)
+}
+
+// openURL opens a URL in the system default browser.
+func (u *appUI) openURL(rawURL string) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
+	_ = fyne.CurrentApp().OpenURL(parsed)
+}
+
+// callPrefix extracts the DXCC prefix from a callsign: the leading letters
+// before the first digit. e.g. "G1TLH" → "G", "DL3ABC" → "DL".
+func callPrefix(call string) string {
+	for i, ch := range call {
+		if ch >= '0' && ch <= '9' {
+			return call[:i]
+		}
+	}
+	return call // no digit found — return whole call (e.g. "BEACON")
+}
+
+// parseSpotLineForMenu extracts the callsign, frequency (kHz), and band from a
+// DX cluster spot line. Returns zero values if the line is not a spot.
+//
+// Line format (from FormatDXCluster / spotLineRe):
+//
+//	DX de SPOTTER:   14033.0  G1TLH          13 dB  23 WPM  CQ            1701Z
+func parseSpotLineForMenu(line string) (call string, freqKHz float64, band string) {
+	// Reuse the existing regex from audiotune.go — it captures freq and comment.
+	// We need the callsign too, which is the token after the frequency.
+	// Full line: "DX de SPOTTER:   FREQ  CALL   COMMENT   TIMEZ"
+	line = strings.TrimRight(line, "\r\n ")
+	if !strings.HasPrefix(line, "DX de ") {
+		return
+	}
+	// Split on runs of whitespace; the fixed-width format means:
+	// fields[0]="DX" [1]="de" [2]="SPOTTER:" [3]=freq [4]=call [5..]=comment+time
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return
+	}
+	var err error
+	freqKHz, err = strconv.ParseFloat(fields[3], 64)
+	if err != nil {
+		return "", 0, ""
+	}
+	call = strings.ToUpper(fields[4])
+	band = freqKHzToBand(freqKHz)
+	return
+}
+
+// freqKHzToBand maps a frequency in kHz to an amateur band string (e.g. "20m").
+// Returns "" if the frequency doesn't fall in a recognised band.
+func freqKHzToBand(kHz float64) string {
+	switch {
+	case kHz >= 135.7 && kHz <= 137.8:
+		return "2200m"
+	case kHz >= 472 && kHz <= 479:
+		return "630m"
+	case kHz >= 1800 && kHz <= 2000:
+		return "160m"
+	case kHz >= 3500 && kHz <= 4000:
+		return "80m"
+	case kHz >= 5258 && kHz <= 5450:
+		return "60m"
+	case kHz >= 7000 && kHz <= 7300:
+		return "40m"
+	case kHz >= 10100 && kHz <= 10150:
+		return "30m"
+	case kHz >= 14000 && kHz <= 14350:
+		return "20m"
+	case kHz >= 18068 && kHz <= 18168:
+		return "17m"
+	case kHz >= 21000 && kHz <= 21450:
+		return "15m"
+	case kHz >= 24890 && kHz <= 24990:
+		return "12m"
+	case kHz >= 28000 && kHz <= 29700:
+		return "10m"
+	case kHz >= 50000 && kHz <= 54000:
+		return "6m"
+	default:
+		return ""
+	}
+}
+
 func (u *appUI) disconnect() {
 	// Swap out the client and stop it off the UI thread to avoid a deadlock:
 	// c.Stop() blocks on wg.Wait() while the read goroutine may be trying to
@@ -1504,7 +1751,8 @@ const termFlushInterval = 250 * time.Millisecond
 type termWidget struct {
 	widget.BaseWidget
 
-	onDoubleTap func(line string) // called on UI thread; nil = no-op
+	onDoubleTap    func(line string)                    // called on UI thread; nil = no-op
+	onSecondaryTap func(line string, pos fyne.Position) // called on UI thread; nil = no-op
 
 	mu        sync.Mutex
 	lines     []string
@@ -1552,6 +1800,24 @@ func (tw *termWidget) DoubleTapped(e *fyne.PointEvent) {
 	tw.mu.Unlock()
 	if text != "" && tw.onDoubleTap != nil {
 		tw.onDoubleTap(text)
+	}
+}
+
+// TappedSecondary maps the secondary-tap (right-click) Y coordinate to a line
+// index and fires onSecondaryTap with the line text and absolute canvas position.
+func (tw *termWidget) TappedSecondary(e *fyne.PointEvent) {
+	if tw.rowHeight <= 0 {
+		return
+	}
+	row := int(e.Position.Y / tw.rowHeight)
+	tw.mu.Lock()
+	var text string
+	if row >= 0 && row < len(tw.lines) {
+		text = tw.lines[row]
+	}
+	tw.mu.Unlock()
+	if text != "" && tw.onSecondaryTap != nil {
+		tw.onSecondaryTap(text, e.AbsolutePosition)
 	}
 }
 
@@ -1618,7 +1884,8 @@ type terminalView struct {
 	tw     *termWidget
 	scroll *container.Scroll
 
-	onDoubleTap func(line string) // forwarded to tw.onDoubleTap
+	onDoubleTap    func(line string)                    // forwarded to tw.onDoubleTap
+	onSecondaryTap func(line string, pos fyne.Position) // forwarded to tw.onSecondaryTap
 
 	mu      sync.Mutex
 	lines   []string // ring of up to termMaxLines complete lines
@@ -1632,10 +1899,15 @@ func newTerminalView() *terminalView {
 		tw:     tw,
 		scroll: container.NewVScroll(tw),
 	}
-	// Forward the double-tap callback.
+	// Forward the double-tap and secondary-tap callbacks.
 	tw.onDoubleTap = func(line string) {
 		if tv.onDoubleTap != nil {
 			tv.onDoubleTap(line)
+		}
+	}
+	tw.onSecondaryTap = func(line string, pos fyne.Position) {
+		if tv.onSecondaryTap != nil {
+			tv.onSecondaryTap(line, pos)
 		}
 	}
 
