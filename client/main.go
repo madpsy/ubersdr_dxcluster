@@ -63,10 +63,10 @@ const (
 	prefAudioAutoConnect = "audio_auto_connect" // bool — connect audio client to the same instance
 
 	// flrig integration (XML-RPC sync with flrig transceiver control).
-	prefFlrigEnabled   = "flrig_enabled"   // bool — flrig sync on/off
-	prefFlrigHost      = "flrig_host"      // e.g. "127.0.0.1"
-	prefFlrigPort      = "flrig_port"      // e.g. "12345"
-	prefFlrigDirection = "flrig_direction" // "sdr-to-rig" | "rig-to-sdr" | "both"
+	// Direction is always "sdr-to-rig": spot double-click → push to flrig.
+	prefFlrigEnabled = "flrig_enabled" // bool — flrig sync on/off
+	prefFlrigHost    = "flrig_host"    // e.g. "127.0.0.1"
+	prefFlrigPort    = "flrig_port"    // e.g. "12345"
 )
 
 func main() {
@@ -163,7 +163,7 @@ func newAppUI(w fyne.Window, prefs fyne.Preferences) *appUI {
 	ui.flrig.Configure(
 		prefs.StringWithFallback(prefFlrigHost, "127.0.0.1"),
 		prefs.IntWithFallback(prefFlrigPort, 12345),
-		prefs.StringWithFallback(prefFlrigDirection, "sdr-to-rig"),
+		"sdr-to-rig",
 		prefs.BoolWithFallback(prefFlrigEnabled, false),
 	)
 	ui.flrig.Start()
@@ -235,9 +235,9 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.connectBtn.Importance = widget.HighImportance
 
 	u.helpBtn = widget.NewButton("?", u.showHelpDialog)
-	u.audioTuneBtn = widget.NewButton("Audio Client…", u.showAudioClientDialog)
-	u.flrigBtn = widget.NewButton("flrig…", u.showFlrigDialog)
-	u.startupCmdsBtn = widget.NewButton("Commands…", u.showStartupCmdsDialog)
+	u.audioTuneBtn = widget.NewButton("Audio Client", u.showAudioClientDialog)
+	u.flrigBtn = widget.NewButton("flrig", u.showFlrigDialog)
+	u.startupCmdsBtn = widget.NewButton("Commands", u.showStartupCmdsDialog)
 
 	connectRow := container.NewHBox(
 		widget.NewLabel("Callsign:"),
@@ -1388,10 +1388,9 @@ func (u *appUI) showAudioClientDialog() {
 
 // showFlrigDialog opens a modal that lets the user configure flrig XML-RPC sync.
 // When enabled, double-clicking a spot line pushes the frequency and mode to
-// flrig (sdr-to-rig), or flrig changes update the status bar (rig-to-sdr), or
-// both directions are active simultaneously.
+// flrig (sdr-to-rig direction only).
 func (u *appUI) showFlrigDialog() {
-	enabledCheck := widget.NewCheck("Enable flrig frequency/mode sync", nil)
+	enabledCheck := widget.NewCheck("Enable flrig frequency/mode sync on spot double-click", nil)
 	enabledCheck.SetChecked(u.prefs.BoolWithFallback(prefFlrigEnabled, false))
 
 	hostEntry := widget.NewEntry()
@@ -1402,16 +1401,9 @@ func (u *appUI) showFlrigDialog() {
 	portEntry.SetPlaceHolder("12345")
 	portEntry.SetText(strconv.Itoa(u.prefs.IntWithFallback(prefFlrigPort, 12345)))
 
-	dirSelect := widget.NewSelect(
-		[]string{"sdr-to-rig", "rig-to-sdr", "both"},
-		nil,
-	)
-	dirSelect.SetSelected(u.prefs.StringWithFallback(prefFlrigDirection, "sdr-to-rig"))
-
 	form := widget.NewForm(
 		widget.NewFormItem("Host", hostEntry),
 		widget.NewFormItem("Port", portEntry),
-		widget.NewFormItem("Direction", dirSelect),
 	)
 
 	// Test button: attempts system.listMethods against the host/port currently
@@ -1454,11 +1446,6 @@ func (u *appUI) showFlrigDialog() {
 		}()
 	})
 
-	dirHelp := widget.NewLabelWithStyle(
-		"sdr-to-rig: spot double-click → flrig\nrig-to-sdr: flrig tunes → shown in status bar\nboth: bidirectional with echo prevention",
-		fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
-	dirHelp.Wrapping = fyne.TextWrapWord
-
 	body := container.NewVBox(
 		enabledCheck,
 		widget.NewSeparator(),
@@ -1466,7 +1453,6 @@ func (u *appUI) showFlrigDialog() {
 			"flrig XML-RPC address (default: 127.0.0.1:12345):",
 			fyne.TextAlignLeading, fyne.TextStyle{}),
 		form,
-		dirHelp,
 		widget.NewSeparator(),
 		container.NewHBox(testBtn),
 		widget.NewSeparator(),
@@ -1488,20 +1474,15 @@ func (u *appUI) showFlrigDialog() {
 			if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
 				port = p
 			}
-			dir := dirSelect.Selected
-			if dir == "" {
-				dir = "sdr-to-rig"
-			}
 			enabled := enabledCheck.Checked
 
 			u.prefs.SetBool(prefFlrigEnabled, enabled)
 			u.prefs.SetString(prefFlrigHost, host)
 			u.prefs.SetInt(prefFlrigPort, port)
-			u.prefs.SetString(prefFlrigDirection, dir)
 
-			u.flrig.Configure(host, port, dir, enabled)
+			u.flrig.Configure(host, port, "sdr-to-rig", enabled)
 		}, u.win)
-	d.Resize(fyne.NewSize(480, 400))
+	d.Resize(fyne.NewSize(480, 340))
 	d.Show()
 	u.win.Canvas().Focus(hostEntry)
 }
@@ -1514,7 +1495,7 @@ func (u *appUI) resetPreferences() {
 		prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds,
 		prefAutoConnectLocalCallsign, prefAutoConnectLocalAddr,
 		prefAudioEnabled, prefAudioHost, prefAudioPort, prefAudioAutoConnect,
-		prefFlrigEnabled, prefFlrigHost, prefFlrigPort, prefFlrigDirection,
+		prefFlrigEnabled, prefFlrigHost, prefFlrigPort,
 	} {
 		u.prefs.RemoveValue(key)
 	}
