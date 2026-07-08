@@ -11,6 +11,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -88,6 +90,8 @@ type appUI struct {
 	listener *TelnetListener
 
 	instanceLabel  *widget.Label
+	connDot        *canvas.Circle
+	connDotBox     fyne.CanvasObject
 	callsign       *widget.Entry
 	portEntry      *widget.Entry
 	connectBtn     *widget.Button
@@ -117,6 +121,12 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.chooseBtn = widget.NewButton("Choose Instance…", u.showInstancePicker)
 	u.instanceLabel = widget.NewLabelWithStyle("— none —", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
+	// Connection status dot: red = disconnected, green = connected.
+	// canvas.Circle has no MinSize; wrap it in a fixed-size container so the
+	// HBox allocates the right amount of space for it.
+	u.connDot = canvas.NewCircle(color.NRGBA{R: 180, G: 40, B: 40, A: 255})
+	u.connDotBox = container.NewGridWrap(fyne.NewSize(12, 12), u.connDot)
+
 	u.autoCheck = widget.NewCheck("Auto-connect on startup", func(checked bool) {
 		if u.updatingAutoCheck {
 			return
@@ -136,6 +146,7 @@ func (u *appUI) build() fyne.CanvasObject {
 
 	instanceRow := container.NewHBox(
 		u.chooseBtn,
+		u.connDotBox,
 		widget.NewLabel("Instance:"),
 		u.instanceLabel,
 		layout.NewSpacer(),

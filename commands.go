@@ -319,7 +319,7 @@ var spiderKeywords = map[string]bool{
 	"bystate": true, "by_state": true, "day": true, "days": true,
 	"exact": true, "rt": true, "real": true, "filt": true,
 	"qsl": true, "iota": true, "qra": true,
-	"cont": true, "continent": true, "country": true,
+	"cont": true, "continent": true, "country": true, "countryname": true,
 	"mode": true, "type": true, "prefix": true,
 }
 
@@ -477,6 +477,15 @@ func (t *TelnetServer) handleShowDX(args []string, state *ClientState) string {
 		case "country":
 			if next != "" {
 				p.CountryCode = strings.ToUpper(next)
+				i += 2
+			} else {
+				i++
+			}
+			continue
+
+		case "countryname":
+			if next != "" {
+				p.CountryName = next
 				i += 2
 			} else {
 				i++

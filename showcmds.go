@@ -56,12 +56,16 @@ func (t *TelnetServer) handleShowPrefix(args []string) string {
 		}
 		// DX Spider format (cmd/show/prefix.pl):
 		//   <call> CC: <cc> IZ: <itu> CZ: <cq> LL: <lat> <lon> (<pfx>, <name>)
-		// Spider's CC is the numeric DXCC entity; UberSDR's CTY provides the
-		// ISO country_code instead, which we use in its place.
+		// Spider's CC is the numeric DXCC entity number; we use the primary
+		// prefix as the closest equivalent (e.g. "G", "K", "VK").
+		cc := r.PrimaryPrefix
+		if cc == "" {
+			cc = r.CountryCode // fallback to ISO2 if primary prefix unavailable
+		}
 		lines = append(lines, fmt.Sprintf(
-			"%-10s CC: %-4s IZ: %2d CZ: %2d LL: %-5s %-6s (%s)",
-			call, r.CountryCode, r.ITUZone, r.CQZone,
-			slat(r.Latitude), slong(r.Longitude), r.Country))
+			"%-10s CC: %-4s IZ: %2d CZ: %2d LL: %-5s %-6s (%s, %s)",
+			call, cc, r.ITUZone, r.CQZone,
+			slat(r.Latitude), slong(r.Longitude), r.PrimaryPrefix, r.Country))
 	}
 	return strings.Join(lines, "\r\n")
 }
@@ -107,24 +111,60 @@ func (t *TelnetServer) handleShowHeading(args []string) string {
 // handleShowDXCC implements SHOW/DXCC <prefix> — show recent spots for the
 // DXCC country that <prefix> resolves to. In DX Spider this is a pure alias
 // for "SHOW/DX dxcc <prefix>" (see cmd/Aliases: '^sho?w?/dxcc' → 'show/dx dxcc'),
-// producing normal spot lines with no extra header. We match that by resolving
-// the prefix to a country_code via CTY and delegating to show/dx.
+// producing normal spot lines with no extra header.
+//
+// Resolution strategy:
+//  1. Try /api/cty/entity?prefix=<pfx> — exact entity lookup by primary prefix.
+//     This is the correct path for "show/dxcc G", "show/dxcc VK", etc.
+//  2. Fall back to /api/cty/lookup?callsign=<pfx> — callsign prefix matching.
+//     This handles cases where the user passes a callsign like "show/dxcc G3ABC".
+//
+// Filtering strategy:
+//   - If the entity has an ISO2 country_code, filter spots by country_code.
+//   - Otherwise (non-sovereign entities like Shetland, Spratly, etc.) filter
+//     by exact country name match.
 func (t *TelnetServer) handleShowDXCC(args []string, state *ClientState) string {
 	if len(args) == 0 {
 		return "Usage: show/dxcc <prefix> [options]  (e.g. show/dxcc G on 20m)"
 	}
 	pfx := strings.ToUpper(args[0])
-	r, err := lookupCTY(t.ubersdrURL, pfx)
+
+	// Step 1: try exact entity lookup by primary prefix.
+	entity, err := lookupCTYEntity(t.ubersdrURL, pfx)
 	if err != nil {
 		return fmt.Sprintf("show/dxcc error: %v", err)
 	}
-	if r == nil || r.CountryCode == "" {
-		return fmt.Sprintf("show/dxcc: cannot resolve %q to a DXCC country", pfx)
+
+	var countryCode, countryName string
+	if entity != nil {
+		countryCode = entity.CountryCode
+		countryName = entity.Name
+	} else {
+		// Step 2: fall back to callsign prefix matching (e.g. user passed a callsign).
+		r, err := lookupCTY(t.ubersdrURL, pfx)
+		if err != nil {
+			return fmt.Sprintf("show/dxcc error: %v", err)
+		}
+		if r == nil {
+			return fmt.Sprintf("show/dxcc: cannot resolve %q to a DXCC entity", pfx)
+		}
+		countryCode = r.CountryCode
+		countryName = r.Country
 	}
 
-	// Delegate to show/dx with a country filter, honouring any remaining
-	// show/dx-style options after the prefix. No custom header — matches Spider.
-	rest := append([]string{"country", r.CountryCode}, args[1:]...)
+	if countryCode == "" && countryName == "" {
+		return fmt.Sprintf("show/dxcc: cannot resolve %q to a DXCC entity", pfx)
+	}
+
+	// Delegate to show/dx with the appropriate country filter, honouring any
+	// remaining show/dx-style options after the prefix. No custom header — matches Spider.
+	var rest []string
+	if countryCode != "" {
+		rest = append([]string{"country", countryCode}, args[1:]...)
+	} else {
+		// Non-sovereign entity: no ISO2 code — filter by country name in the DB.
+		rest = append([]string{"countryname", countryName}, args[1:]...)
+	}
 	return t.handleShowDX(rest, state)
 }
 

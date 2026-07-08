@@ -361,7 +361,8 @@ type ShowDXParams struct {
 	Spotter     string  // spotter prefix, e.g. "G3ABC"
 	InfoText    string  // substring to match in comment or message
 	Continent   string  // e.g. "EU"
-	CountryCode string  // e.g. "DE"
+	CountryCode string  // ISO 3166-1 alpha-2, e.g. "DE"
+	CountryName string  // exact country name match, e.g. "England" — used when CountryCode is empty
 	Mode        string  // e.g. "FT8"
 	Stream      string  // stream type, e.g. "cwskimmer"
 }
@@ -425,6 +426,11 @@ func (s *SpotStore) Query(p ShowDXParams) ([]Spot, error) {
 	if p.CountryCode != "" {
 		where = append(where, "country_code = ?")
 		args = append(args, strings.ToUpper(p.CountryCode))
+	} else if p.CountryName != "" {
+		// Fallback for non-sovereign entities that have no ISO2 code:
+		// match on the country name column (case-insensitive exact match).
+		where = append(where, "LOWER(country) = LOWER(?)")
+		args = append(args, p.CountryName)
 	}
 	if p.Mode != "" {
 		where = append(where, "mode = ?")

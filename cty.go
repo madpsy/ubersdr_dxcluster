@@ -12,15 +12,32 @@ import (
 
 // ctyLookupResult mirrors the "data" block of UberSDR's /api/cty/lookup response.
 type ctyLookupResult struct {
-	Callsign    string  `json:"callsign"`
-	Country     string  `json:"country"`
+	Callsign      string  `json:"callsign"`
+	Country       string  `json:"country"`
+	CountryCode   string  `json:"country_code"`
+	PrimaryPrefix string  `json:"primary_prefix"`
+	CQZone        int     `json:"cq_zone"`
+	ITUZone       int     `json:"itu_zone"`
+	Continent     string  `json:"continent"`
+	Latitude      float64 `json:"latitude"`
+	Longitude     float64 `json:"longitude"`
+	TimeOffset    float64 `json:"time_offset"`
+	IsWAEDC       bool    `json:"is_waedc"`
+}
+
+// ctyEntityResult mirrors the "data" block of UberSDR's /api/cty/entity response.
+// This is a direct entity lookup by primary prefix — no callsign matching.
+type ctyEntityResult struct {
+	Name        string  `json:"name"`
 	CountryCode string  `json:"country_code"`
+	PrimaryPfx  string  `json:"primary_prefix"`
 	CQZone      int     `json:"cq_zone"`
 	ITUZone     int     `json:"itu_zone"`
 	Continent   string  `json:"continent"`
 	Latitude    float64 `json:"latitude"`
 	Longitude   float64 `json:"longitude"`
 	TimeOffset  float64 `json:"time_offset"`
+	IsWAEDC     bool    `json:"is_waedc"`
 }
 
 // ctyAPIResponse is the envelope returned by all /api/cty/* endpoints.
@@ -30,17 +47,13 @@ type ctyAPIResponse struct {
 	Error   string          `json:"error,omitempty"`
 }
 
-// lookupCTY calls UberSDR's /api/cty/lookup endpoint for a callsign or prefix.
-// Returns:
-//   - result, nil   on success
-//   - nil, nil       when not found (404)
-//   - nil, error     on network error / service unavailable
-func lookupCTY(baseURL, callsign string) (*ctyLookupResult, error) {
-	endpoint := strings.TrimRight(baseURL, "/") + "/api/cty/lookup?callsign=" + url.QueryEscape(callsign)
+// ctyHTTPGet is a shared helper that GETs a CTY API endpoint and decodes the
+// envelope. Returns the raw Data bytes on success, nil on 404, error otherwise.
+func ctyHTTPGet(endpoint string) (json.RawMessage, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Get(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("cty lookup request failed: %w", err)
+		return nil, fmt.Errorf("cty request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -53,18 +66,73 @@ func lookupCTY(baseURL, callsign string) (*ctyLookupResult, error) {
 		if !env.Success {
 			return nil, fmt.Errorf("%s", env.Error)
 		}
-		var result ctyLookupResult
-		if err := json.Unmarshal(env.Data, &result); err != nil {
-			return nil, fmt.Errorf("decode cty data: %w", err)
-		}
-		return &result, nil
+		return env.Data, nil
 	case http.StatusNotFound:
 		return nil, nil
 	case http.StatusServiceUnavailable:
 		return nil, fmt.Errorf("CTY database is not loaded on this receiver")
 	default:
-		return nil, fmt.Errorf("cty lookup failed (HTTP %d)", resp.StatusCode)
+		return nil, fmt.Errorf("cty request failed (HTTP %d)", resp.StatusCode)
 	}
+}
+
+// lookupCTY calls UberSDR's /api/cty/lookup endpoint for a callsign or prefix.
+// Uses callsign prefix matching — returns the best-matching DXCC entity.
+// Returns:
+//   - result, nil   on success
+//   - nil, nil       when not found (404)
+//   - nil, error     on network error / service unavailable
+func lookupCTY(baseURL, callsign string) (*ctyLookupResult, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/cty/lookup?callsign=" + url.QueryEscape(callsign)
+	data, err := ctyHTTPGet(endpoint)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var result ctyLookupResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode cty data: %w", err)
+	}
+	return &result, nil
+}
+
+// lookupCTYEntity calls UberSDR's /api/cty/entity endpoint for a primary prefix.
+// Unlike lookupCTY, this does an exact entity map lookup — no callsign matching.
+// Use this when you have a known primary prefix (e.g. "G", "VK", "K") and want
+// the entity itself, not the best-matching entity for a callsign.
+// Returns:
+//   - result, nil   on success
+//   - nil, nil       when not found (404)
+//   - nil, error     on network error / service unavailable
+func lookupCTYEntity(baseURL, primaryPrefix string) (*ctyEntityResult, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/cty/entity?prefix=" + url.QueryEscape(primaryPrefix)
+	data, err := ctyHTTPGet(endpoint)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var result ctyEntityResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode cty entity data: %w", err)
+	}
+	return &result, nil
+}
+
+// lookupCTYSearch calls UberSDR's /api/cty/search endpoint to find entities
+// whose name contains the given substring (case-insensitive).
+// Returns the list of matching entities, or nil on not-found / empty result.
+func lookupCTYSearch(baseURL, nameQuery string) ([]ctyEntityResult, error) {
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/cty/search?name=" + url.QueryEscape(nameQuery)
+	data, err := ctyHTTPGet(endpoint)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var wrapper struct {
+		Results []ctyEntityResult `json:"results"`
+		Count   int               `json:"count"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, fmt.Errorf("decode cty search data: %w", err)
+	}
+	return wrapper.Results, nil
 }
 
 // ── Great-circle bearing & distance ─────────────────────────────────────────
