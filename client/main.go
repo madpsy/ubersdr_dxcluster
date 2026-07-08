@@ -145,20 +145,10 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.callsign = widget.NewEntry()
 	u.callsign.SetPlaceHolder("Callsign")
 	u.callsign.SetText(u.prefs.StringWithFallback(prefCallsign, ""))
-	u.callsign.OnChanged = func(s string) {
-		up := strings.ToUpper(s)
-		if up != s {
-			u.callsign.SetText(up) // retriggers OnChanged with the upper form
-		}
-		u.prefs.SetString(prefCallsign, up)
-	}
 	u.callsign.OnSubmitted = func(string) { u.onConnect() }
 
 	u.portEntry = widget.NewEntry()
 	u.portEntry.SetText(u.prefs.StringWithFallback(prefTelnetPort, defaultTelnetPort))
-	u.portEntry.OnChanged = func(s string) {
-		u.prefs.SetString(prefTelnetPort, strings.TrimSpace(s))
-	}
 
 	u.connectBtn = widget.NewButton("Connect", u.onConnect)
 	u.connectBtn.Importance = widget.HighImportance
@@ -202,6 +192,9 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.telnetLabel = widget.NewLabel("")
 	statusRow := container.NewHBox(u.statusLabel, layout.NewSpacer(), u.telnetLabel)
 	bottom := container.NewVBox(widget.NewSeparator(), statusRow)
+
+	// Wire up the initial (unlocked) OnChanged handlers for callsign and port.
+	u.setControlsEnabled(true)
 
 	return container.NewBorder(toolbar, bottom, nil, nil, center)
 }
@@ -640,7 +633,7 @@ func (u *appUI) showInstancePicker() {
 		time.AfterFunc(5*time.Second, func() {
 			fyne.Do(func() {
 				if len(localInsts) == 0 {
-					localScanLbl.SetText("None found on this network")
+					localScanLbl.SetText("None found — ensure DX Cluster add-on is installed and enabled")
 				}
 			})
 		})
@@ -984,6 +977,40 @@ You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favou
 	cmdRef.TextStyle = fyne.TextStyle{Monospace: true}
 	cmdRef.Wrapping = fyne.TextWrapOff
 
+	helpLines := strings.Split(helpText, "\n")
+
+	filterEntry := widget.NewEntry()
+	filterEntry.SetPlaceHolder("Filter commands…")
+	filterEntry.OnChanged = func(q string) {
+		q = strings.ToLower(strings.TrimSpace(q))
+		if q == "" {
+			cmdRef.SetText(helpText)
+			return
+		}
+		var out []string
+		for _, line := range helpLines {
+			if strings.Contains(strings.ToLower(line), q) {
+				out = append(out, line)
+			}
+		}
+		if len(out) == 0 {
+			cmdRef.SetText("(no matches)")
+		} else {
+			cmdRef.SetText(strings.Join(out, "\n"))
+		}
+	}
+
+	copyBtn := widget.NewButton("📋 Copy", nil)
+	copyBtn.OnTapped = func() {
+		u.win.Clipboard().SetContent(cmdRef.Text)
+		copyBtn.SetText("✓ Copied")
+		time.AfterFunc(1500*time.Millisecond, func() {
+			fyne.Do(func() { copyBtn.SetText("📋 Copy") })
+		})
+	}
+
+	filterRow := container.NewBorder(nil, nil, nil, copyBtn, filterEntry)
+
 	resetBtn := widget.NewButton("Reset All Preferences…", func() {
 		dialog.ShowConfirm("Reset Preferences",
 			"This will clear your saved callsign, port, auto-connect setting and startup commands.\n\nContinue?",
@@ -997,14 +1024,18 @@ You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favou
 	resetBtn.Importance = widget.DangerImportance
 
 	content := container.NewBorder(
-		intro,
+		container.NewVBox(intro, filterRow),
 		container.NewVBox(widget.NewSeparator(), resetBtn),
 		nil, nil,
 		container.NewScroll(cmdRef),
 	)
 
 	d := dialog.NewCustom("About this Client", "Close", content, u.win)
-	d.Resize(fyne.NewSize(700, 600))
+	winSize := u.win.Canvas().Size()
+	d.Resize(fyne.NewSize(
+		fyne.Min(700, winSize.Width-40),
+		winSize.Height-80,
+	))
 	d.Show()
 }
 
@@ -1080,12 +1111,41 @@ func (u *appUI) updateTitle() {
 
 func (u *appUI) setStatus(msg string) { u.statusLabel.SetText(msg) }
 
-func (u *appUI) setControlsEnabled(_ bool) {
-	// Callsign and port entries are intentionally left always-enabled.
-	// Disabling them in dark mode produces very low-contrast text that is
-	// hard to read. The connect button already prevents re-connecting while
-	// a session is active (it becomes "Disconnect"), so there is no
-	// functional need to dim these fields.
+func (u *appUI) setControlsEnabled(enabled bool) {
+	if enabled {
+		// Restore normal OnChanged handlers so edits are accepted and saved.
+		u.callsign.OnChanged = func(s string) {
+			up := strings.ToUpper(s)
+			if up != s {
+				u.callsign.SetText(up)
+			}
+			u.prefs.SetString(prefCallsign, up)
+		}
+		u.portEntry.OnChanged = func(s string) {
+			u.prefs.SetString(prefTelnetPort, strings.TrimSpace(s))
+		}
+	} else {
+		// Lock the entries while connected: revert any edit immediately.
+		// A guard flag prevents the SetText call from re-triggering OnChanged.
+		var revertingCallsign bool
+		u.callsign.OnChanged = func(string) {
+			if revertingCallsign {
+				return
+			}
+			revertingCallsign = true
+			u.callsign.SetText(u.prefs.StringWithFallback(prefCallsign, ""))
+			revertingCallsign = false
+		}
+		var revertingPort bool
+		u.portEntry.OnChanged = func(string) {
+			if revertingPort {
+				return
+			}
+			revertingPort = true
+			u.portEntry.SetText(u.prefs.StringWithFallback(prefTelnetPort, defaultTelnetPort))
+			revertingPort = false
+		}
+	}
 }
 
 func (u *appUI) setInputEnabled(enabled bool) {
@@ -1137,8 +1197,8 @@ func (c *tappableCell) DoubleTapped(_ *fyne.PointEvent) {
 const termMaxLines = 250
 
 // termFlushInterval is how often the UI label is refreshed. Batching updates
-// at 10 Hz means at most one SetText call per 100 ms regardless of spot rate.
-const termFlushInterval = 100 * time.Millisecond
+// at 4 Hz means at most one SetText call per 250 ms regardless of spot rate.
+const termFlushInterval = 250 * time.Millisecond
 
 // terminalView uses a single widget.Label inside a scroll container.
 // The 250-line ring buffer keeps the rendered string small, and the 10 Hz

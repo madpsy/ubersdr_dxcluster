@@ -25,6 +25,10 @@
       <span>📡</span> Telnet Command Reference
       <button id="help-close" onclick="closeHelpModal()">×</button>
     </div>
+    <div id="help-filter-row">
+      <input id="help-filter" type="search" placeholder="Filter commands…" oninput="filterHelp(this.value)" autocomplete="off">
+      <button id="help-copy-btn" onclick="copyHelpToClipboard()" title="Copy to clipboard">📋</button>
+    </div>
     <div id="help-body">Loading…</div>
   </div>
 </div>

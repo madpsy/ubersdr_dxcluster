@@ -2,14 +2,21 @@
 
 // ── Help modal ─────────────────────────────────────────────────────────────
 let helpLoaded = false;
+let helpRawText = '';   // full unfiltered help text, set once on first load
+let helpLines   = [];   // helpRawText split by newline
 
 function openHelpModal() {
   const overlay = document.getElementById('help-overlay');
   if (overlay) overlay.classList.add('open');
+  // Focus the filter input so the user can start typing immediately
+  const filter = document.getElementById('help-filter');
+  if (filter) { filter.value = ''; setTimeout(() => filter.focus(), 50); }
   if (!helpLoaded) {
     fetch(BASE + '/api/help')
       .then(r => r.text())
       .then(text => {
+        helpRawText = text;
+        helpLines   = text.split('\n');
         const body = document.getElementById('help-body');
         if (body) body.textContent = text;
         helpLoaded = true;
@@ -24,6 +31,46 @@ function openHelpModal() {
 function closeHelpModal() {
   const overlay = document.getElementById('help-overlay');
   if (overlay) overlay.classList.remove('open');
+  // Reset filter so next open shows full text
+  const filter = document.getElementById('help-filter');
+  if (filter) filter.value = '';
+  const body = document.getElementById('help-body');
+  if (body && helpRawText) body.textContent = helpRawText;
+}
+
+/**
+ * Filter the help text to lines containing the query (case-insensitive).
+ * Called by the oninput handler on #help-filter.
+ * @param {string} q
+ */
+function filterHelp(q) {
+  const body = document.getElementById('help-body');
+  if (!body) return;
+  const term = q.trim().toLowerCase();
+  if (!term) {
+    body.textContent = helpRawText || 'Loading…';
+    return;
+  }
+  const matched = helpLines.filter(l => l.toLowerCase().includes(term));
+  body.textContent = matched.length > 0 ? matched.join('\n') : '(no matches)';
+}
+
+/**
+ * Copy the currently displayed help text (filtered or full) to the clipboard.
+ * Briefly changes the button label to "✓" to confirm the copy.
+ */
+function copyHelpToClipboard() {
+  const body = document.getElementById('help-body');
+  const btn  = document.getElementById('help-copy-btn');
+  if (!body) return;
+  const text = body.textContent || '';
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) {
+      const prev = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = prev; }, 1500);
+    }
+  }).catch(() => {});
 }
 
 // ── Client download info modal ──────────────────────────────────────────────
