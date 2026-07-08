@@ -146,7 +146,6 @@ func (u *appUI) build() fyne.CanvasObject {
 
 	instanceRow := container.NewHBox(
 		u.chooseBtn,
-		u.connDotBox,
 		widget.NewLabel("Instance:"),
 		u.instanceLabel,
 		layout.NewSpacer(),
@@ -201,7 +200,7 @@ func (u *appUI) build() fyne.CanvasObject {
 	// ── Status bar ─────────────────────────────────────────────────────────
 	u.statusLabel = widget.NewLabel("")
 	u.telnetLabel = widget.NewLabel("")
-	statusRow := container.NewHBox(u.statusLabel, layout.NewSpacer(), u.telnetLabel)
+	statusRow := container.NewHBox(u.connDotBox, u.statusLabel, layout.NewSpacer(), u.telnetLabel)
 	bottom := container.NewVBox(widget.NewSeparator(), statusRow)
 
 	// Wire up the initial (unlocked) OnChanged handlers for callsign and port.
@@ -904,8 +903,11 @@ func (u *appUI) newClient(inst Instance, call string, listener *TelnetListener) 
 				listener.Broadcast(text)
 			}
 		},
-		func(msg string, _ bool) { // status change
-			fyne.Do(func() { u.setStatus(msg) })
+		func(msg string, connected bool) { // status change
+			fyne.Do(func() {
+				u.setStatus(msg)
+				u.setConnDot(connected)
+			})
 		},
 	)
 	c.SetOnLoggedIn(func() {
@@ -1100,6 +1102,7 @@ func (u *appUI) disconnect() {
 	u.updateTitle()
 	u.telnetLabel.SetText("")
 	u.setStatus("Disconnected")
+	u.setConnDot(false)
 }
 
 func (u *appUI) isConnected() bool { return u.client.Load() != nil }
@@ -1121,6 +1124,20 @@ func (u *appUI) updateTitle() {
 // ── Small helpers ──────────────────────────────────────────────────────────
 
 func (u *appUI) setStatus(msg string) { u.statusLabel.SetText(msg) }
+
+// setConnDot updates the connection status dot colour.
+// Must be called on the UI thread (inside fyne.Do or a Fyne callback).
+func (u *appUI) setConnDot(connected bool) {
+	if u.connDot == nil {
+		return
+	}
+	if connected {
+		u.connDot.FillColor = color.NRGBA{R: 40, G: 180, B: 40, A: 255}
+	} else {
+		u.connDot.FillColor = color.NRGBA{R: 180, G: 40, B: 40, A: 255}
+	}
+	u.connDot.Refresh()
+}
 
 func (u *appUI) setControlsEnabled(enabled bool) {
 	if enabled {
