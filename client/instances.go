@@ -67,6 +67,26 @@ func (i Instance) TerminalWSURL() string {
 	return fmt.Sprintf("%s://%s/addon/dxcluster/api/terminal", scheme, hostport)
 }
 
+// HTTPURL builds the plain HTTP(S) base URL of the instance, suitable for
+// handing to the ubersdr-audio client's POST /api/v1/connect endpoint.
+//
+// If the directory supplied a public_url it is used verbatim (trailing slash
+// trimmed); otherwise the URL is composed from host/port/tls.
+func (i Instance) HTTPURL() string {
+	if u := strings.TrimSpace(i.PublicURL); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	scheme := "http"
+	if i.TLS {
+		scheme = "https"
+	}
+	hostport := i.Host
+	if i.Port != 0 {
+		hostport = fmt.Sprintf("%s:%d", i.Host, i.Port)
+	}
+	return fmt.Sprintf("%s://%s", scheme, hostport)
+}
+
 // FetchDXClusterInstances fetches the instance directory and returns only the
 // instances that run the DX cluster add-on, sorted by name.
 func FetchDXClusterInstances(ctx context.Context) ([]Instance, error) {

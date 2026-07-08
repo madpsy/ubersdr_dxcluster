@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"fmt"
 	"image/color"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -53,6 +55,12 @@ const (
 	// autoConnectLocalSentinel is stored in prefAutoConnect to signal that the
 	// last chosen instance was local (not in the public directory).
 	autoConnectLocalSentinel = "local"
+
+	// Audio client integration (ubersdr-audio HTTP API).
+	prefAudioEnabled     = "audio_tune_enabled" // bool — spot-tune feature on/off
+	prefAudioHost        = "audio_host"         // e.g. "127.0.0.1"
+	prefAudioPort        = "audio_port"         // e.g. "9770"
+	prefAudioAutoConnect = "audio_auto_connect" // bool — connect audio client to the same instance
 )
 
 func main() {
@@ -98,11 +106,13 @@ type appUI struct {
 	chooseBtn      *widget.Button
 	autoCheck      *widget.Check
 	helpBtn        *widget.Button
+	audioTuneBtn   *widget.Button
 	startupCmdsBtn *widget.Button
 	inputEntry     *widget.Entry
 	sendBtn        *widget.Button
 	statusLabel    *widget.Label
 	telnetLabel    *widget.Label
+	audioLabel     *widget.Label // shows last audio-client tune result
 	term           *terminalView
 
 	headers []string
@@ -164,6 +174,7 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.connectBtn.Importance = widget.HighImportance
 
 	u.helpBtn = widget.NewButton("?", u.showHelpDialog)
+	u.audioTuneBtn = widget.NewButton("Audio Client…", u.showAudioClientDialog)
 	u.startupCmdsBtn = widget.NewButton("Commands…", u.showStartupCmdsDialog)
 
 	connectRow := container.NewHBox(
@@ -174,6 +185,7 @@ func (u *appUI) build() fyne.CanvasObject {
 		u.connectBtn,
 		layout.NewSpacer(),
 		u.helpBtn,
+		u.audioTuneBtn,
 		u.startupCmdsBtn,
 	)
 
@@ -181,6 +193,32 @@ func (u *appUI) build() fyne.CanvasObject {
 
 	// ── Terminal / spot stream (fills the window) ──────────────────────────
 	u.term = newTerminalView()
+
+	// Wire double-tap: parse the spot line and tune the audio client if enabled.
+	u.term.onDoubleTap = func(line string) {
+		if !u.prefs.BoolWithFallback(prefAudioEnabled, false) {
+			return
+		}
+		freqHz, mode, ok := ParseSpotLine(line)
+		if !ok {
+			return // digital spot or non-spot line — do nothing
+		}
+		host := u.prefs.StringWithFallback(prefAudioHost, defaultAudioHost)
+		port := u.prefs.StringWithFallback(prefAudioPort, defaultAudioPort)
+		baseURL := AudioClientBaseURL(host, port)
+		go func() {
+			err := TuneAudioClient(baseURL, freqHz, mode)
+			fyne.Do(func() {
+				if err != nil {
+					u.setAudioStatus("⚠ "+err.Error(), false)
+				} else {
+					u.setAudioStatus(fmt.Sprintf("⇒ %.1f kHz %s",
+						float64(freqHz)/1000.0, strings.ToUpper(mode)), true)
+				}
+			})
+		}()
+	}
+
 	termHeader := widget.NewLabelWithStyle(
 		"DX Cluster spot stream", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
@@ -200,9 +238,16 @@ func (u *appUI) build() fyne.CanvasObject {
 	// ── Status bar ─────────────────────────────────────────────────────────
 	u.statusLabel = widget.NewLabel("")
 	u.telnetLabel = widget.NewLabel("")
+	u.audioLabel = widget.NewLabel("")
 	// Wrap the dot in a Centre container so it aligns vertically with the
 	// label text regardless of the row height chosen by HBox.
-	statusRow := container.NewHBox(container.NewCenter(u.connDotBox), u.statusLabel, layout.NewSpacer(), u.telnetLabel)
+	statusRow := container.NewHBox(
+		container.NewCenter(u.connDotBox),
+		u.statusLabel,
+		layout.NewSpacer(),
+		u.audioLabel,
+		u.telnetLabel,
+	)
 	bottom := container.NewVBox(widget.NewSeparator(), statusRow)
 
 	// Wire up the initial (unlocked) OnChanged handlers for callsign and port.
@@ -835,6 +880,7 @@ func (u *appUI) onConnect() {
 	client := u.newClient(inst, call, listener)
 	u.client.Store(client)
 	client.Start()
+	u.maybeAutoConnectAudioClient(inst)
 
 	u.connectBtn.SetText("Disconnect")
 	u.setControlsEnabled(false)
@@ -867,8 +913,35 @@ func (u *appUI) switchTo(inst Instance) {
 	client := u.newClient(inst, call, u.listener)
 	u.client.Store(client)
 	client.Start()
+	u.maybeAutoConnectAudioClient(inst)
 	u.updateTitle()
 	u.win.Canvas().Focus(u.inputEntry)
+}
+
+// maybeAutoConnectAudioClient tells the ubersdr-audio client to connect to the
+// same instance this DX cluster client just connected to, but only when the
+// "Auto connect to this instance in Audio Client" preference is enabled. The
+// HTTP call runs off the UI thread; the result is surfaced in the status bar's
+// audio label. Failures are non-fatal (the audio client may not be running).
+func (u *appUI) maybeAutoConnectAudioClient(inst Instance) {
+	if !u.prefs.BoolWithFallback(prefAudioAutoConnect, false) {
+		return
+	}
+	host := u.prefs.StringWithFallback(prefAudioHost, defaultAudioHost)
+	port := u.prefs.StringWithFallback(prefAudioPort, defaultAudioPort)
+	baseURL := AudioClientBaseURL(host, port)
+	instURL := inst.HTTPURL()
+	label := inst.Callsign
+	go func() {
+		err := ConnectAudioClient(baseURL, instURL)
+		fyne.Do(func() {
+			if err != nil {
+				u.setAudioStatus("⚠ audio client connect failed", false)
+			} else {
+				u.setAudioStatus("⇒ audio client → "+label, true)
+			}
+		})
+	}()
 }
 
 // newListener builds the telnet listener. Its forward callback reads the
@@ -1054,6 +1127,176 @@ You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favou
 	d.Show()
 }
 
+// showAudioClientDialog opens a modal that lets the user configure the
+// ubersdr-audio HTTP API integration. When enabled, double-clicking a CW,
+// SSB, or voice spot line tunes the audio client to that frequency and mode.
+func (u *appUI) showAudioClientDialog() {
+	enabledCheck := widget.NewCheck("Enable UberSDR Audio Client tuning on spot double-click", nil)
+	enabledCheck.SetChecked(u.prefs.BoolWithFallback(prefAudioEnabled, false))
+
+	hostEntry := widget.NewEntry()
+	hostEntry.SetPlaceHolder(defaultAudioHost)
+	hostEntry.SetText(u.prefs.StringWithFallback(prefAudioHost, defaultAudioHost))
+
+	portEntry := widget.NewEntry()
+	portEntry.SetPlaceHolder(defaultAudioPort)
+	portEntry.SetText(u.prefs.StringWithFallback(prefAudioPort, defaultAudioPort))
+
+	form := widget.NewForm(
+		widget.NewFormItem("Host", hostEntry),
+		widget.NewFormItem("Port", portEntry),
+	)
+
+	// Test button + result label: performs a live GET /api/v1/status against
+	// the host/port currently typed in the form (not the saved prefs) so the
+	// user can verify connectivity before saving.
+	testResult := widget.NewLabel("")
+	testResult.Wrapping = fyne.TextWrapWord
+	var testBtn *widget.Button
+	testBtn = widget.NewButton("Test Connection", func() {
+		host := strings.TrimSpace(hostEntry.Text)
+		if host == "" {
+			host = defaultAudioHost
+		}
+		port := strings.TrimSpace(portEntry.Text)
+		if port == "" {
+			port = defaultAudioPort
+		}
+		baseURL := AudioClientBaseURL(host, port)
+		testBtn.Disable()
+		testResult.Importance = widget.MediumImportance
+		testResult.SetText("Testing " + host + ":" + port + "…")
+		go func() {
+			err := TestAudioClient(baseURL)
+			fyne.Do(func() {
+				testBtn.Enable()
+				if err != nil {
+					testResult.Importance = widget.DangerImportance
+					testResult.SetText("✗ Cannot reach the UberSDR Audio Client. " +
+						"Check that it is running and that the host and port are correct.")
+				} else {
+					testResult.Importance = widget.SuccessImportance
+					testResult.SetText("✓ Connected to the UberSDR Audio Client.")
+				}
+			})
+		}()
+	})
+
+	// Download button: opens the OS-appropriate audio client binary URL in the
+	// user's default browser. Hidden/disabled on platforms with no prebuilt
+	// binary (e.g. macOS).
+	dlURL, dlPlatform, dlOK := AudioClientDownloadURL()
+	var downloadBtn *widget.Button
+	if dlOK {
+		downloadBtn = widget.NewButton("Download Audio Client ("+dlPlatform+")", func() {
+			u, err := url.Parse(dlURL)
+			if err != nil {
+				testResult.Importance = widget.DangerImportance
+				testResult.SetText("✗ Invalid download URL.")
+				return
+			}
+			if err := fyne.CurrentApp().OpenURL(u); err != nil {
+				testResult.Importance = widget.DangerImportance
+				testResult.SetText("✗ Could not open the download link: " + err.Error())
+			}
+		})
+		downloadBtn.SetIcon(theme.DownloadIcon())
+	} else {
+		downloadBtn = widget.NewButton("Download Audio Client", func() {
+			testResult.Importance = widget.WarningImportance
+			testResult.SetText("No prebuilt UberSDR Audio Client is available for " +
+				dlPlatform + ". Build it from source instead.")
+		})
+		downloadBtn.SetIcon(theme.DownloadIcon())
+	}
+
+	// ── Instance auto-connect section ──────────────────────────────────────
+	// Tells the audio client which UberSDR instance to connect to (the same one
+	// this DX cluster client is using), via POST /api/v1/connect.
+	autoConnectCheck := widget.NewCheck(
+		"Auto connect to this instance in Audio Client", nil)
+	autoConnectCheck.SetChecked(u.prefs.BoolWithFallback(prefAudioAutoConnect, false))
+
+	var connectBtn *widget.Button
+	connectBtn = widget.NewButton("Connect Audio Client to this instance", func() {
+		if u.current == nil {
+			testResult.Importance = widget.WarningImportance
+			testResult.SetText("Choose and connect to an instance first.")
+			return
+		}
+		host := strings.TrimSpace(hostEntry.Text)
+		if host == "" {
+			host = defaultAudioHost
+		}
+		port := strings.TrimSpace(portEntry.Text)
+		if port == "" {
+			port = defaultAudioPort
+		}
+		baseURL := AudioClientBaseURL(host, port)
+		instURL := u.current.HTTPURL()
+		instLabel := u.current.Callsign
+		connectBtn.Disable()
+		testResult.Importance = widget.MediumImportance
+		testResult.SetText("Connecting Audio Client to " + instLabel + "…")
+		go func() {
+			err := ConnectAudioClient(baseURL, instURL)
+			fyne.Do(func() {
+				connectBtn.Enable()
+				if err != nil {
+					testResult.Importance = widget.DangerImportance
+					testResult.SetText("✗ Could not tell the Audio Client to connect. " +
+						"Check that it is running and that the host and port are correct.")
+				} else {
+					testResult.Importance = widget.SuccessImportance
+					testResult.SetText("✓ Audio Client is connecting to " + instLabel + ".")
+				}
+			})
+		}()
+	})
+	connectBtn.SetIcon(theme.MediaPlayIcon())
+
+	// Everything stacks top-to-bottom in a single VBox. The VBox is anchored to
+	// the top of the dialog (via a top-region Border) so its children keep their
+	// natural heights instead of being stretched to fill the dialog.
+	body := container.NewVBox(
+		enabledCheck,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle(
+			"UberSDR Audio Client API address (default: 127.0.0.1:9770):",
+			fyne.TextAlignLeading, fyne.TextStyle{}),
+		form,
+		container.NewHBox(testBtn, downloadBtn),
+		widget.NewSeparator(),
+		autoConnectCheck,
+		container.NewHBox(connectBtn),
+		widget.NewSeparator(),
+		testResult,
+	)
+	content := container.NewBorder(body, nil, nil, nil)
+
+	d := dialog.NewCustomConfirm("Audio Client", "Save", "Cancel", content,
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			u.prefs.SetBool(prefAudioEnabled, enabledCheck.Checked)
+			host := strings.TrimSpace(hostEntry.Text)
+			if host == "" {
+				host = defaultAudioHost
+			}
+			port := strings.TrimSpace(portEntry.Text)
+			if port == "" {
+				port = defaultAudioPort
+			}
+			u.prefs.SetString(prefAudioHost, host)
+			u.prefs.SetString(prefAudioPort, port)
+			u.prefs.SetBool(prefAudioAutoConnect, autoConnectCheck.Checked)
+		}, u.win)
+	d.Resize(fyne.NewSize(500, 380))
+	d.Show()
+	u.win.Canvas().Focus(hostEntry)
+}
+
 // resetPreferences clears all saved preferences via the Fyne API and reloads
 // the UI fields to their defaults. Works on all platforms without any
 // file-path logic.
@@ -1061,6 +1304,7 @@ func (u *appUI) resetPreferences() {
 	for _, key := range []string{
 		prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds,
 		prefAutoConnectLocalCallsign, prefAutoConnectLocalAddr,
+		prefAudioEnabled, prefAudioHost, prefAudioPort, prefAudioAutoConnect,
 	} {
 		u.prefs.RemoveValue(key)
 	}
@@ -1126,6 +1370,29 @@ func (u *appUI) updateTitle() {
 // ── Small helpers ──────────────────────────────────────────────────────────
 
 func (u *appUI) setStatus(msg string) { u.statusLabel.SetText(msg) }
+
+// setAudioStatus updates the audio-client result label in the status bar.
+// ok=true → green "⇒ freq mode"; ok=false → red "⚠ error".
+// The label auto-clears after 5 seconds.
+func (u *appUI) setAudioStatus(msg string, ok bool) {
+	if u.audioLabel == nil {
+		return
+	}
+	if ok {
+		u.audioLabel.Importance = widget.SuccessImportance
+	} else {
+		u.audioLabel.Importance = widget.DangerImportance
+	}
+	u.audioLabel.SetText(msg)
+	time.AfterFunc(5*time.Second, func() {
+		fyne.Do(func() {
+			if u.audioLabel.Text == msg {
+				u.audioLabel.SetText("")
+				u.audioLabel.Importance = widget.MediumImportance
+			}
+		})
+	})
+}
 
 // setConnDot updates the connection status dot colour.
 // Must be called on the UI thread (inside fyne.Do or a Fyne callback).
@@ -1219,23 +1486,139 @@ func (c *tappableCell) DoubleTapped(_ *fyne.PointEvent) {
 	}
 }
 
-// ── terminalView: a bounded, auto-scrolling virtualised text pane ──────────
+// ── termWidget: custom widget that renders spot lines as canvas.Text ────────
+//
+// termWidget extends widget.BaseWidget and renders each line as a canvas.Text
+// object positioned at y = i*rowHeight with zero padding between rows.
+// It implements DoubleTapped so the caller can map a click to a line index.
+// Wrap it in container.NewVScroll; MinSize reports the full content height so
+// the scroll container knows how tall the content is.
 
 // termMaxLines is the maximum number of lines kept in the scrollback buffer.
-// With only 250 short lines the label render is fast and there's no
-// inter-row padding (unlike widget.List which adds padding between rows).
 const termMaxLines = 250
 
-// termFlushInterval is how often the UI label is refreshed. Batching updates
-// at 4 Hz means at most one SetText call per 250 ms regardless of spot rate.
+// termFlushInterval is how often the widget is refreshed. Batching updates at
+// 4 Hz means at most one Refresh call per 250 ms regardless of spot rate.
 const termFlushInterval = 250 * time.Millisecond
 
-// terminalView uses a single widget.Label inside a scroll container.
-// The 250-line ring buffer keeps the rendered string small, and the 10 Hz
-// ticker throttles redraws so CPU usage stays low even at high spot rates.
+type termWidget struct {
+	widget.BaseWidget
+
+	onDoubleTap func(line string) // called on UI thread; nil = no-op
+
+	mu        sync.Mutex
+	lines     []string
+	rowHeight float32 // height of one text row, measured once at construction
+}
+
+func newTermWidget() *termWidget {
+	tw := &termWidget{}
+	// Measure the true glyph-box height of one monospace text row using
+	// fyne.MeasureText. Unlike widget.Label.MinSize(), this excludes the
+	// label's internal vertical padding (2×InnerPadding), so rows sit flush
+	// against one another with no visible gap. Both the renderer (which places
+	// each canvas.Text at y = i*rowHeight) and DoubleTapped (which maps
+	// Position.Y / rowHeight back to a line index) use this same value, so
+	// hit-testing stays perfectly aligned with what is drawn.
+	sz := theme.TextSize()
+	m := fyne.MeasureText("Xygj|", sz, fyne.TextStyle{Monospace: true})
+	tw.rowHeight = m.Height
+	tw.ExtendBaseWidget(tw)
+	return tw
+}
+
+func (tw *termWidget) MinSize() fyne.Size {
+	tw.mu.Lock()
+	n := len(tw.lines)
+	tw.mu.Unlock()
+	return fyne.NewSize(0, float32(n)*tw.rowHeight)
+}
+
+func (tw *termWidget) CreateRenderer() fyne.WidgetRenderer {
+	return &termRenderer{tw: tw}
+}
+
+// DoubleTapped maps the tap Y coordinate to a line index and fires onDoubleTap.
+func (tw *termWidget) DoubleTapped(e *fyne.PointEvent) {
+	if tw.rowHeight <= 0 {
+		return
+	}
+	row := int(e.Position.Y / tw.rowHeight)
+	tw.mu.Lock()
+	var text string
+	if row >= 0 && row < len(tw.lines) {
+		text = tw.lines[row]
+	}
+	tw.mu.Unlock()
+	if text != "" && tw.onDoubleTap != nil {
+		tw.onDoubleTap(text)
+	}
+}
+
+// termRenderer renders each line as a canvas.Text at y = i*rowHeight.
+type termRenderer struct {
+	tw    *termWidget
+	texts []*canvas.Text
+}
+
+func (r *termRenderer) Layout(size fyne.Size) {
+	for i, t := range r.texts {
+		t.Move(fyne.NewPos(0, float32(i)*r.tw.rowHeight))
+		t.Resize(fyne.NewSize(size.Width, r.tw.rowHeight))
+	}
+}
+
+func (r *termRenderer) MinSize() fyne.Size { return r.tw.MinSize() }
+
+func (r *termRenderer) Refresh() {
+	r.tw.mu.Lock()
+	lines := make([]string, len(r.tw.lines))
+	copy(lines, r.tw.lines)
+	r.tw.mu.Unlock()
+
+	// Grow the canvas.Text pool if needed.
+	fg := theme.ForegroundColor()
+	sz := theme.TextSize()
+	for len(r.texts) < len(lines) {
+		t := canvas.NewText("", fg)
+		t.TextStyle = fyne.TextStyle{Monospace: true}
+		t.TextSize = sz
+		r.texts = append(r.texts, t)
+	}
+	// Update text content; hide unused slots.
+	for i, t := range r.texts {
+		if i < len(lines) {
+			t.Text = lines[i]
+			t.Show()
+		} else {
+			t.Text = ""
+			t.Hide()
+		}
+		t.Refresh()
+	}
+	r.Layout(r.tw.Size())
+}
+
+func (r *termRenderer) Objects() []fyne.CanvasObject {
+	objs := make([]fyne.CanvasObject, len(r.texts))
+	for i, t := range r.texts {
+		objs[i] = t
+	}
+	return objs
+}
+
+func (r *termRenderer) Destroy() {}
+
+// ── terminalView: scroll wrapper + data management ──────────────────────────
+
+// terminalView wraps termWidget in a VScroll and manages the line buffer.
+// The onDoubleTap field is set by the caller (appUI) and receives the raw
+// line text; it is called on the Fyne UI thread.
 type terminalView struct {
-	label  *widget.Label
+	tw     *termWidget
 	scroll *container.Scroll
+
+	onDoubleTap func(line string) // forwarded to tw.onDoubleTap
 
 	mu      sync.Mutex
 	lines   []string // ring of up to termMaxLines complete lines
@@ -1244,13 +1627,19 @@ type terminalView struct {
 }
 
 func newTerminalView() *terminalView {
-	lbl := widget.NewLabel("")
-	lbl.TextStyle = fyne.TextStyle{Monospace: true}
-	lbl.Wrapping = fyne.TextWrapOff
-	tv := &terminalView{label: lbl}
-	tv.scroll = container.NewVScroll(lbl)
+	tw := newTermWidget()
+	tv := &terminalView{
+		tw:     tw,
+		scroll: container.NewVScroll(tw),
+	}
+	// Forward the double-tap callback.
+	tw.onDoubleTap = func(line string) {
+		if tv.onDoubleTap != nil {
+			tv.onDoubleTap(line)
+		}
+	}
 
-	// Background ticker: flush pending changes to the label at most 10×/sec.
+	// Background ticker: flush pending changes at most 4×/sec.
 	go func() {
 		ticker := time.NewTicker(termFlushInterval)
 		defer ticker.Stop()
@@ -1260,11 +1649,15 @@ func newTerminalView() *terminalView {
 				tv.mu.Unlock()
 				continue
 			}
-			content := strings.Join(tv.lines, "\n")
+			snapshot := make([]string, len(tv.lines))
+			copy(snapshot, tv.lines)
 			tv.dirty = false
 			tv.mu.Unlock()
 			fyne.Do(func() {
-				tv.label.SetText(content)
+				tw.mu.Lock()
+				tw.lines = snapshot
+				tw.mu.Unlock()
+				tw.Refresh()
 				tv.scroll.ScrollToBottom()
 			})
 		}
@@ -1275,7 +1668,7 @@ func newTerminalView() *terminalView {
 
 // append adds server text to the pane. Safe to call from any goroutine.
 // Text is split on newlines; complete lines are added to the ring buffer and
-// the list is refreshed by the background ticker (at most 10×/sec).
+// the widget is refreshed by the background ticker (at most 4×/sec).
 func (tv *terminalView) append(text string) {
 	// Normalise CR/LF → LF so lines split cleanly.
 	text = strings.ReplaceAll(text, "\r\n", "\n")
@@ -1309,5 +1702,10 @@ func (tv *terminalView) clear() {
 	tv.pending = ""
 	tv.dirty = false
 	tv.mu.Unlock()
-	fyne.Do(func() { tv.label.SetText("") })
+	fyne.Do(func() {
+		tv.tw.mu.Lock()
+		tv.tw.lines = nil
+		tv.tw.mu.Unlock()
+		tv.tw.Refresh()
+	})
 }
