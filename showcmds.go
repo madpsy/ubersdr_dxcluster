@@ -25,7 +25,7 @@ func (t *TelnetServer) handleShowWho() string {
 	for _, c := range clients {
 		call := c.Callsign
 		if call == "" {
-			call = "(logging in…)"
+			call = "(logging in...)"
 		}
 		dur := formatDuration(now.Sub(c.ConnectedAt))
 		lines = append(lines, fmt.Sprintf("%-12s %-20s %s", call, c.MaskedIP, dur))
@@ -76,7 +76,7 @@ func (t *TelnetServer) handleShowHeading(args []string) string {
 		return "Usage: show/heading <callsign|prefix> [...]"
 	}
 	if t.rxLat == 0 && t.rxLon == 0 {
-		return "Receiver location is not configured — headings unavailable."
+		return "Receiver location is not configured - headings unavailable."
 	}
 	var lines []string
 	for _, arg := range args {
@@ -249,10 +249,14 @@ func (t *TelnetServer) handleShowStatus() string {
 	days := int(uptime.Hours()) / 24
 	hours := int(uptime.Hours()) % 24
 	mins := int(uptime.Minutes()) % 60
-	fmt.Fprintf(&b, "UberSDR DX Cluster — %s\r\n", t.version)
+	fmt.Fprintf(&b, "UberSDR DX Cluster - %s\r\n", t.version)
 	fmt.Fprintf(&b, "Uptime    : %dd %02dh %02dm\r\n", days, hours, mins)
 	fmt.Fprintf(&b, "Clients   : %d connected\r\n", t.ClientCount())
-	fmt.Fprintf(&b, "Receiver  : %s — %s\r\n", t.rxName, t.rxLocation)
+	if t.rxCallsign != "" {
+		fmt.Fprintf(&b, "Receiver  : %s - %s - %s\r\n", t.rxCallsign, t.rxName, t.rxLocation)
+	} else {
+		fmt.Fprintf(&b, "Receiver  : %s - %s\r\n", t.rxName, t.rxLocation)
+	}
 
 	if t.store == nil {
 		b.WriteString("Database  : not available\r\n")
@@ -261,7 +265,7 @@ func (t *TelnetServer) handleShowStatus() string {
 
 	streams, oldest, newest, sizeKB, err := t.store.StatsOverview()
 	if err != nil {
-		fmt.Fprintf(&b, "Database  : error — %v\r\n", err)
+		fmt.Fprintf(&b, "Database  : error - %v\r\n", err)
 		return b.String()
 	}
 
@@ -282,7 +286,7 @@ func (t *TelnetServer) handleShowStatus() string {
 
 	// Date range
 	if !oldest.IsZero() && !newest.IsZero() {
-		fmt.Fprintf(&b, "DB Range  : %s → %s\r\n",
+		fmt.Fprintf(&b, "DB Range  : %s -> %s\r\n",
 			oldest.Format("2-Jan-2006 15:04Z"),
 			newest.Format("2-Jan-2006 15:04Z"))
 	}

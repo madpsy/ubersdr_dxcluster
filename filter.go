@@ -712,7 +712,7 @@ func (f *ClientFilter) Summary() string {
 	}
 
 	if len(lines) == 0 {
-		return "No active filters — receiving all spots."
+		return "No active filters - receiving all spots."
 	}
 	return "Active filters:\r\n" + strings.Join(lines, "\r\n")
 }

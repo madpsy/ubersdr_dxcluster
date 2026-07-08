@@ -48,6 +48,7 @@ type TelnetServer struct {
 	hub          *Hub
 	store        *SpotStore
 	spotterCall  string
+	rxCallsign   string
 	rxName       string
 	rxLocation   string
 	rxLat        float64
@@ -70,6 +71,7 @@ func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string
 		hub:          hub,
 		store:        store,
 		spotterCall:  spotterCall,
+		rxCallsign:   rx.Callsign,
 		rxName:       rx.Name,
 		rxLocation:   rx.Location,
 		rxLat:        rx.Lat,

@@ -4,10 +4,10 @@ package main
 // the web UI's help modal, and the desktop client's help dialog.
 // It lives in its own file so the client build can cp it directly.
 const helpText = `
-UberSDR DX Cluster — Command Reference
+UberSDR DX Cluster - Command Reference
 =======================================
 
-Commands can be abbreviated: SET/FILTER → SET/F, SHOW/DX → SH/DX, etc.
+Commands can be abbreviated: SET/FILTER -> SET/F, SHOW/DX -> SH/DX, etc.
 
 SIMPLE FILTERS  (AND-combined; multiple values within a field are OR-combined)
   set/filter band <bands>       Filter by band (comma-separated)
@@ -83,8 +83,8 @@ DX SPIDER ACCEPT/REJECT FILTERS  (numbered slots 0-9, default slot 1)
   SLOT SEMANTICS (matching DX Spider):
     Each numbered slot (0-9) can hold BOTH a reject rule and an accept rule.
     Slots are evaluated in order. Within a slot, reject is checked first:
-      - if reject matches → spot is DROPPED
-      - if accept matches → spot is KEPT
+      - if reject matches -> spot is DROPPED
+      - if accept matches -> spot is KEPT
     If only reject rules exist: everything passes EXCEPT matching spots.
     If only accept rules exist: ONLY matching spots pass.
 

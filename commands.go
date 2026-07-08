@@ -72,7 +72,7 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 		return fmt.Sprintf("UTC: %s", time.Now().UTC().Format("2006-01-02 15:04:05"))
 
 	case "show/version":
-		return fmt.Sprintf("UberSDR DX Cluster — %s", t.version)
+		return fmt.Sprintf("UberSDR DX Cluster - %s", t.version)
 
 	case "show/dx":
 		return t.handleShowDX(parts[1:], state)
@@ -197,7 +197,7 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 		}
 		n, err := strconv.Atoi(parts[1])
 		if err != nil || n < 0 || n > 9 {
-			return fmt.Sprintf("Invalid slot number %q — use 0-9 or 'all'", parts[1])
+			return fmt.Sprintf("Invalid slot number %q - use 0-9 or 'all'", parts[1])
 		}
 		state.Filter.Slots[n] = nil
 		return fmt.Sprintf("Filter slot %d cleared.", n)
@@ -236,19 +236,19 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 		case "snr":
 			v, err := strconv.ParseFloat(val, 64)
 			if err != nil {
-				return "Invalid SNR value — use a number, e.g. set/filter snr 10"
+				return "Invalid SNR value - use a number, e.g. set/filter snr 10"
 			}
 			state.Filter.MinSNR = &v
 			return fmt.Sprintf("Filter set: snr >= %.1f dB", v)
 		case "maxsnr":
 			v, err := strconv.ParseFloat(val, 64)
 			if err != nil {
-				return "Invalid SNR value — use a number, e.g. set/filter maxsnr 30"
+				return "Invalid SNR value - use a number, e.g. set/filter maxsnr 30"
 			}
 			state.Filter.MaxSNR = &v
 			return fmt.Sprintf("Filter set: maxsnr <= %.1f dB", v)
 		default:
-			return fmt.Sprintf("Unknown filter field %q — type HELP for usage", field)
+			return fmt.Sprintf("Unknown filter field %q - type HELP for usage", field)
 		}
 
 	// ── clear/filter ───────────────────────────────────────────────────────
@@ -284,11 +284,11 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 			state.Filter.MaxSNR = nil
 			return "Filter cleared: maxsnr"
 		default:
-			return fmt.Sprintf("Unknown filter field %q — type HELP for usage", field)
+			return fmt.Sprintf("Unknown filter field %q - type HELP for usage", field)
 		}
 
 	default:
-		return fmt.Sprintf("Unknown command %q — type HELP for a list of commands", parts[0])
+		return fmt.Sprintf("Unknown command %q - type HELP for a list of commands", parts[0])
 	}
 }
 

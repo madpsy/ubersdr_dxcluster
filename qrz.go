@@ -94,7 +94,7 @@ func lookupQRZ(baseURL, callsign string) (*qrzLookupResult, error) {
 	case http.StatusServiceUnavailable:
 		return nil, fmt.Errorf("QRZ lookup is not enabled on this receiver")
 	case http.StatusTooManyRequests:
-		return nil, fmt.Errorf("rate limit exceeded — please slow down")
+		return nil, fmt.Errorf("rate limit exceeded - please slow down")
 	default:
 		var e qrzErrorResult
 		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Error != "" {
