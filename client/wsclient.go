@@ -188,6 +188,17 @@ func (c *DXClusterClient) connectOnce() (bool, error) {
 	c.status("Connected", true)
 
 	callsignSent := false
+	loggedIn := false
+
+	fireLoggedIn := func() {
+		if !loggedIn {
+			loggedIn = true
+			if c.onLoggedIn != nil {
+				go c.onLoggedIn()
+			}
+		}
+	}
+
 	for {
 		typ, data, err := conn.Read(c.ctx)
 		if err != nil {
@@ -197,13 +208,24 @@ func (c *DXClusterClient) connectOnce() (bool, error) {
 			continue
 		}
 		text := string(data)
+		lower := strings.ToLower(text)
 
 		// Auto-respond to the callsign prompt (matches the web UI logic).
-		if !callsignSent && strings.Contains(strings.ToLower(text), "callsign") {
+		if !callsignSent && strings.Contains(lower, "callsign") {
 			callsignSent = true
 			_ = c.sendRaw(c.callsign + "\r\n")
-			if c.onLoggedIn != nil {
-				go c.onLoggedIn()
+		}
+
+		// Fire onLoggedIn after the server sends the post-login banner.
+		// We recognise two markers from our own server's banner:
+		//   "hello de"  — first line after login (telnet.go)
+		//   "type help" — last line of the banner (also telnet.go)
+		// Either is sufficient; the first one seen wins.
+		// This ensures the server is fully in command-handling mode before
+		// startup commands are sent.
+		if callsignSent {
+			if strings.Contains(lower, "hello de") || strings.Contains(lower, "type help") {
+				fireLoggedIn()
 			}
 		}
 

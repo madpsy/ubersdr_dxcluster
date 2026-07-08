@@ -782,15 +782,12 @@ func (u *appUI) updateTitle() {
 
 func (u *appUI) setStatus(msg string) { u.statusLabel.SetText(msg) }
 
-func (u *appUI) setControlsEnabled(enabled bool) {
-	widgets := []fyne.Disableable{u.callsign, u.portEntry}
-	for _, w := range widgets {
-		if enabled {
-			w.Enable()
-		} else {
-			w.Disable()
-		}
-	}
+func (u *appUI) setControlsEnabled(_ bool) {
+	// Callsign and port entries are intentionally left always-enabled.
+	// Disabling them in dark mode produces very low-contrast text that is
+	// hard to read. The connect button already prevents re-connecting while
+	// a session is active (it becomes "Disconnect"), so there is no
+	// functional need to dim these fields.
 }
 
 func (u *appUI) setInputEnabled(enabled bool) {
@@ -924,6 +921,9 @@ func (tv *terminalView) append(text string) {
 
 	// All but the last element are complete lines.
 	for _, line := range parts[:len(parts)-1] {
+		if line == "" {
+			continue // skip blank lines produced by \r\n normalisation
+		}
 		tv.lines = append(tv.lines, line)
 		if len(tv.lines) > termMaxLines {
 			tv.lines = tv.lines[len(tv.lines)-termMaxLines:]
