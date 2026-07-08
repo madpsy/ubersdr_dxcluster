@@ -39,8 +39,18 @@ const titleDisconnected = "UberSDR DX Cluster"
 const (
 	prefCallsign    = "callsign"
 	prefTelnetPort  = "telnet_port"
-	prefAutoConnect = "auto_connect_uuid" // instance UUID to auto-connect on startup, or ""
+	prefAutoConnect = "auto_connect_uuid" // instance UUID / "local" sentinel / "none"
 	prefStartupCmds = "startup_commands"  // newline-separated commands sent after login
+
+	// prefAutoConnectLocal* are only written when the last auto-connect target
+	// was a local (mDNS-discovered) instance. prefAutoConnect is set to the
+	// sentinel value "local" in that case.
+	prefAutoConnectLocalCallsign = "auto_connect_local_callsign" // e.g. "MM3NDH"
+	prefAutoConnectLocalAddr     = "auto_connect_local_addr"     // e.g. "192.168.1.4:8080"
+
+	// autoConnectLocalSentinel is stored in prefAutoConnect to signal that the
+	// last chosen instance was local (not in the public directory).
+	autoConnectLocalSentinel = "local"
 )
 
 func main() {
@@ -117,6 +127,9 @@ func (u *appUI) build() fyne.CanvasObject {
 			// Write "none" (not "") so we can distinguish "user explicitly
 			// disabled" from "never configured" on the next launch.
 			u.prefs.SetString(prefAutoConnect, "none")
+			// Clear local-instance prefs so they don't linger.
+			u.prefs.RemoveValue(prefAutoConnectLocalCallsign)
+			u.prefs.RemoveValue(prefAutoConnectLocalAddr)
 		}
 	})
 	u.autoCheck.Disable() // enabled once an instance is chosen
@@ -218,12 +231,13 @@ func (u *appUI) refresh() {
 
 // doStartup runs once after the first successful fetch and decides what to do:
 //
-//  1. The user's saved auto-connect preference (a UUID) takes priority over
-//     everything else — a filename-encoded callsign must not override it.
-//     It is resolved against the fresh directory so a changed host/port is fine.
+//  1. The user's saved auto-connect preference takes priority:
+//     - "local" sentinel → probe the last-known local instance via mDNS/HTTP.
+//     - a UUID string   → resolve against the public directory (host/port may
+//     have changed, but the UUID is stable).
+//     - "none"          → user explicitly disabled auto-connect; open picker.
 //  2. If no auto-connect preference is set and the program's own filename
-//     encodes an instance callsign (e.g. "dxcluster_m9psy" or
-//     "dxcluster_m9psy.exe"), connect to the matching instance.
+//     encodes an instance callsign (e.g. "dxcluster_m9psy"), connect to it.
 //  3. Otherwise, open the instance picker.
 func (u *appUI) doStartup() {
 	saved := u.prefs.String(prefAutoConnect)
@@ -231,10 +245,22 @@ func (u *appUI) doStartup() {
 	switch {
 	case saved == "none":
 		// User explicitly unchecked auto-connect — respect that choice.
-		// Still open the picker so they can connect manually.
 		if len(u.instances) > 0 {
 			u.showInstancePicker()
 		}
+		return
+
+	case saved == autoConnectLocalSentinel:
+		// Last session used a local (mDNS) instance. Try to reconnect to it.
+		// We need a callsign to connect, so bail early if none is saved.
+		if strings.TrimSpace(u.callsign.Text) == "" {
+			if len(u.instances) > 0 {
+				u.showInstancePicker()
+			}
+			return
+		}
+		u.setStatus("Looking for local instance…")
+		go u.doLocalAutoConnect()
 		return
 
 	case saved != "":
@@ -277,6 +303,114 @@ func (u *appUI) doStartup() {
 	}
 }
 
+// doLocalAutoConnect attempts to reconnect to the last-used local instance.
+// It runs in a background goroutine. Strategy:
+//  1. Fast path: probe the last-known host:port directly (IP may be unchanged).
+//  2. Slow path: start an mDNS browse and wait up to 8 s for an instance whose
+//     callsign matches the saved callsign.
+//  3. If neither succeeds, open the instance picker on the UI thread.
+func (u *appUI) doLocalAutoConnect() {
+	savedCallsign := strings.ToUpper(strings.TrimSpace(u.prefs.String(prefAutoConnectLocalCallsign)))
+	savedAddr := u.prefs.String(prefAutoConnectLocalAddr)
+
+	// matchesCallsign returns true if the instance callsign matches the saved
+	// one, or if no callsign was saved (accept any local dxcluster instance).
+	matchesCallsign := func(cs string) bool {
+		return savedCallsign == "" || strings.ToUpper(strings.TrimSpace(cs)) == savedCallsign
+	}
+
+	// ── fast path: try the last-known address directly ─────────────────────
+	if savedAddr != "" {
+		host, port, err := splitHostPort(savedAddr)
+		if err == nil {
+			if desc, probeErr := probeDescription(host, port); probeErr == nil && desc.hasDXCluster() {
+				if matchesCallsign(desc.Receiver.Callsign) {
+					inst := instanceFromDesc(desc, host, port)
+					fyne.Do(func() {
+						u.setStatus("Auto-connecting to local instance " + inst.Name + "…")
+						u.chooseInstance(inst)
+					})
+					return
+				}
+			}
+		}
+	}
+
+	// ── slow path: mDNS browse with 8 s timeout ────────────────────────────
+	mdns, err := NewMDNSDiscovery(nil) // onChange not needed; we poll below
+	if err != nil {
+		fyne.Do(func() {
+			u.setStatus("mDNS unavailable — choose an instance manually")
+			if len(u.instances) > 0 {
+				u.showInstancePicker()
+			}
+		})
+		return
+	}
+	defer mdns.Stop()
+
+	// Poll the mDNS results every 250 ms until we find a callsign match or
+	// the timeout expires. Polling avoids adding a callback channel to MDNSDiscovery.
+	deadline := time.Now().Add(8 * time.Second)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for _, inst := range mdns.Instances() {
+			if matchesCallsign(inst.Callsign) {
+				instCopy := inst
+				fyne.Do(func() {
+					u.setStatus("Auto-connecting to local instance " + instCopy.Name + "…")
+					u.chooseInstance(instCopy)
+				})
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			fyne.Do(func() {
+				u.setStatus("Local instance not found — choose one")
+				if len(u.instances) > 0 {
+					u.showInstancePicker()
+				}
+			})
+			return
+		}
+	}
+}
+
+// splitHostPort splits "host:port" into host string and port int.
+func splitHostPort(addr string) (host string, port int, err error) {
+	h, p, ok := strings.Cut(addr, ":")
+	if !ok {
+		return "", 0, fmt.Errorf("no colon in %q", addr)
+	}
+	n, convErr := strconv.Atoi(p)
+	if convErr != nil {
+		return "", 0, fmt.Errorf("invalid port in %q: %w", addr, convErr)
+	}
+	return h, n, nil
+}
+
+// instanceFromDesc builds an Instance from a probed /api/description response.
+func instanceFromDesc(desc *apiDescription, host string, port int) Instance {
+	name := desc.Receiver.Name
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", host, port)
+	}
+	return Instance{
+		ID:               fmt.Sprintf("local:%s:%d", host, port),
+		Callsign:         desc.Receiver.Callsign,
+		Name:             name,
+		Location:         desc.Receiver.Location,
+		Host:             host,
+		Port:             port,
+		TLS:              false,
+		AvailableClients: desc.AvailableClients,
+		MaxClients:       desc.MaxClients,
+		IsOnline:         true,
+	}
+}
+
 // showInstancePicker opens a modal dialog with the filterable instance list.
 // Selecting an instance chooses it (and reconnects if a session is active).
 func (u *appUI) showInstancePicker() {
@@ -313,10 +447,11 @@ func (u *appUI) showInstancePicker() {
 	// ── local (mDNS) table ─────────────────────────────────────────────────
 	localHdr := widget.NewLabelWithStyle("Local (on this network)", fyne.TextAlignLeading,
 		fyne.TextStyle{Bold: true})
-	localScanLbl := widget.NewLabel("Scanning…")
+	localScanLbl := widget.NewLabel("Finding local instances…")
 
+	localHeaders := []string{"Callsign", "Name", "Location", "Address"}
 	localTable = widget.NewTable(
-		func() (int, int) { return len(localInsts), len(u.headers) },
+		func() (int, int) { return len(localInsts), len(localHeaders) },
 		func() fyne.CanvasObject {
 			c := newTappableCell()
 			c.onTap = func(row, col int) {
@@ -350,12 +485,26 @@ func (u *appUI) showInstancePicker() {
 				cell.SetText(inst.Name)
 			case 2:
 				cell.SetText(inst.Location)
+			case 3:
+				cell.SetText(fmt.Sprintf("%s:%d", inst.Host, inst.Port))
 			}
 		},
 	)
+	localTable.ShowHeaderRow = true
+	localTable.CreateHeader = func() fyne.CanvasObject {
+		l := widget.NewLabel("")
+		l.TextStyle.Bold = true
+		return l
+	}
+	localTable.UpdateHeader = func(id widget.TableCellID, o fyne.CanvasObject) {
+		if id.Col >= 0 && id.Col < len(localHeaders) {
+			o.(*widget.Label).SetText(localHeaders[id.Col])
+		}
+	}
 	localTable.SetColumnWidth(0, 130)
-	localTable.SetColumnWidth(1, 320)
-	localTable.SetColumnWidth(2, 320)
+	localTable.SetColumnWidth(1, 220)
+	localTable.SetColumnWidth(2, 220)
+	localTable.SetColumnWidth(3, 160)
 	localTable.OnSelected = func(id widget.TableCellID) {
 		selectedLocal = id.Row
 		selectedPublic = -1
@@ -476,7 +625,7 @@ func (u *appUI) showInstancePicker() {
 		fyne.Do(func() {
 			localInsts = mdns.Instances()
 			if len(localInsts) == 0 {
-				localScanLbl.SetText("Scanning…")
+				localScanLbl.SetText("Finding local instances…")
 			} else {
 				localScanLbl.SetText(fmt.Sprintf("%d found", len(localInsts)))
 			}
@@ -485,6 +634,16 @@ func (u *appUI) showInstancePicker() {
 	})
 	if mdnsErr != nil {
 		localScanLbl.SetText("mDNS unavailable")
+	} else {
+		// After 5 s, if nothing has been found yet, update the label so the
+		// user knows the initial sweep is done (browse continues in background).
+		time.AfterFunc(5*time.Second, func() {
+			fyne.Do(func() {
+				if len(localInsts) == 0 {
+					localScanLbl.SetText("None found on this network")
+				}
+			})
+		})
 	}
 
 	// ── layout ─────────────────────────────────────────────────────────────
@@ -542,17 +701,29 @@ func (u *appUI) loadAutoConnect() string {
 	return u.prefs.String(prefAutoConnect)
 }
 
-// saveAutoConnect records the instance's UUID as the startup target.
+// saveAutoConnect records the instance as the startup target.
+// For public instances the UUID is stored (stable across host/port changes).
+// For local (mDNS) instances the sentinel "local" is stored together with the
+// callsign and last-known address so doLocalAutoConnect can find it again.
 func (u *appUI) saveAutoConnect(inst *Instance) {
 	if inst == nil || inst.ID == "" {
 		return
 	}
-	u.prefs.SetString(prefAutoConnect, inst.ID)
+	if strings.HasPrefix(inst.ID, "local:") {
+		u.prefs.SetString(prefAutoConnect, autoConnectLocalSentinel)
+		u.prefs.SetString(prefAutoConnectLocalCallsign, strings.ToUpper(strings.TrimSpace(inst.Callsign)))
+		u.prefs.SetString(prefAutoConnectLocalAddr, fmt.Sprintf("%s:%d", inst.Host, inst.Port))
+	} else {
+		u.prefs.SetString(prefAutoConnect, inst.ID)
+		// Clear any stale local prefs from a previous local session.
+		u.prefs.RemoveValue(prefAutoConnectLocalCallsign)
+		u.prefs.RemoveValue(prefAutoConnectLocalAddr)
+	}
 }
 
 // refreshAutoCheck syncs the checkbox to the current instance without firing
 // its OnChanged handler: enabled once an instance is chosen, ticked when that
-// instance's UUID is the saved startup target.
+// instance is the saved startup target.
 func (u *appUI) refreshAutoCheck() {
 	u.updatingAutoCheck = true
 	defer func() { u.updatingAutoCheck = false }()
@@ -563,8 +734,19 @@ func (u *appUI) refreshAutoCheck() {
 		return
 	}
 	u.autoCheck.Enable()
-	uuid := u.loadAutoConnect()
-	u.autoCheck.SetChecked(uuid != "" && uuid == u.current.ID)
+	saved := u.loadAutoConnect()
+	var checked bool
+	switch {
+	case saved == autoConnectLocalSentinel && strings.HasPrefix(u.current.ID, "local:"):
+		// Local instance: match by callsign (IP may have changed).
+		savedCS := strings.ToUpper(strings.TrimSpace(u.prefs.String(prefAutoConnectLocalCallsign)))
+		currentCS := strings.ToUpper(strings.TrimSpace(u.current.Callsign))
+		checked = savedCS != "" && savedCS == currentCS
+	case saved != "" && saved != "none" && saved != autoConnectLocalSentinel:
+		// Public instance: match by UUID.
+		checked = saved == u.current.ID
+	}
+	u.autoCheck.SetChecked(checked)
 }
 
 func instanceByID(list []Instance, id string) *Instance {
@@ -830,7 +1012,10 @@ You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favou
 // the UI fields to their defaults. Works on all platforms without any
 // file-path logic.
 func (u *appUI) resetPreferences() {
-	for _, key := range []string{prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds} {
+	for _, key := range []string{
+		prefCallsign, prefTelnetPort, prefAutoConnect, prefStartupCmds,
+		prefAutoConnectLocalCallsign, prefAutoConnectLocalAddr,
+	} {
 		u.prefs.RemoveValue(key)
 	}
 	// Reload UI fields to defaults.
