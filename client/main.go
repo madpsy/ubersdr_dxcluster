@@ -1013,6 +1013,9 @@ func (u *appUI) switchTo(inst Instance) {
 // HTTP call runs off the UI thread; the result is surfaced in the status bar's
 // audio label. Failures are non-fatal (the audio client may not be running).
 func (u *appUI) maybeAutoConnectAudioClient(inst Instance) {
+	if !u.prefs.BoolWithFallback(prefAudioEnabled, false) {
+		return
+	}
 	if !u.prefs.BoolWithFallback(prefAudioAutoConnect, false) {
 		return
 	}
@@ -1344,6 +1347,23 @@ func (u *appUI) showAudioClientDialog() {
 	})
 	connectBtn.SetIcon(theme.MediaPlayIcon())
 
+	// setAudioSubEnabled enables or disables all controls that are subordinate
+	// to the master "Enable" checkbox. Called once on open and again whenever
+	// the checkbox changes.
+	setAudioSubEnabled := func(on bool) {
+		for _, w := range []fyne.Disableable{hostEntry, portEntry, testBtn, autoConnectCheck, connectBtn} {
+			if on {
+				w.Enable()
+			} else {
+				w.Disable()
+			}
+		}
+	}
+	// Apply initial state before the dialog is shown.
+	setAudioSubEnabled(enabledCheck.Checked)
+	// Wire the master checkbox so toggling it immediately greys/ungreys the rest.
+	enabledCheck.OnChanged = func(on bool) { setAudioSubEnabled(on) }
+
 	// Everything stacks top-to-bottom in a single VBox. The VBox is anchored to
 	// the top of the dialog (via a top-region Border) so its children keep their
 	// natural heights instead of being stretched to fill the dialog.
@@ -1445,6 +1465,20 @@ func (u *appUI) showFlrigDialog() {
 			})
 		}()
 	})
+
+	// setFlrigSubEnabled enables or disables all controls subordinate to the
+	// master "Enable" checkbox. Applied once on open and on every toggle.
+	setFlrigSubEnabled := func(on bool) {
+		for _, w := range []fyne.Disableable{hostEntry, portEntry, testBtn} {
+			if on {
+				w.Enable()
+			} else {
+				w.Disable()
+			}
+		}
+	}
+	setFlrigSubEnabled(enabledCheck.Checked)
+	enabledCheck.OnChanged = func(on bool) { setFlrigSubEnabled(on) }
 
 	body := container.NewVBox(
 		enabledCheck,
