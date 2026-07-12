@@ -161,6 +161,34 @@ func (f *FlrigSync) IsConnected() bool {
 	return f.connected
 }
 
+// GetLastFreqKHz returns the last VFO frequency read from flrig, converted to
+// kHz as a formatted string suitable for pre-filling the spot freq field
+// (e.g. "14225.0"). Returns "" if flrig is disabled, not connected, or no
+// frequency has been read yet.
+func (f *FlrigSync) GetLastFreqKHz() string {
+	f.mu.Lock()
+	enabled := f.enabled
+	connected := f.connected
+	hz := f.lastFlrigFreq
+	f.mu.Unlock()
+	if !enabled || !connected || hz == 0 {
+		return ""
+	}
+	khz := float64(hz) / 1000.0
+	// Format with enough decimal places to be useful but not noisy:
+	// whole kHz → no decimals, otherwise up to 3 decimal places trimmed.
+	if hz%1000 == 0 {
+		return fmt.Sprintf("%.0f", khz)
+	}
+	if hz%100 == 0 {
+		return fmt.Sprintf("%.1f", khz)
+	}
+	if hz%10 == 0 {
+		return fmt.Sprintf("%.2f", khz)
+	}
+	return fmt.Sprintf("%.3f", khz)
+}
+
 // Start launches the background poll and reconnect goroutines.
 // Safe to call multiple times — subsequent calls are no-ops if already running.
 func (f *FlrigSync) Start() {

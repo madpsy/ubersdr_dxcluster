@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"net"
@@ -57,6 +58,7 @@ type TelnetServer struct {
 	clients      atomic.Int32
 	version      string
 	requireLogin bool
+	spotPassword string // SPOT_PASSWORD env var; empty = spot submission disabled
 	startTime    time.Time
 
 	// connected client tracking (one entry per active connection)
@@ -65,7 +67,7 @@ type TelnetServer struct {
 	nextConnID atomic.Uint64
 }
 
-func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string, rx ReceiverInfo, ubersdrURL string, requireLogin bool) *TelnetServer {
+func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string, rx ReceiverInfo, ubersdrURL string, requireLogin bool, spotPassword string) *TelnetServer {
 	return &TelnetServer{
 		addr:         addr,
 		hub:          hub,
@@ -79,6 +81,7 @@ func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string
 		ubersdrURL:   ubersdrURL,
 		version:      "ubersdr_dxcluster/1.0",
 		requireLogin: requireLogin,
+		spotPassword: spotPassword,
 		startTime:    time.Now(),
 		clientMap:    make(map[uint64]*clientEntry),
 	}
@@ -254,25 +257,79 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 			return // connection closed (by timeout or client)
 		}
 		input := strings.TrimSpace(loginScanner.Text())
-		call := strings.ToUpper(input)
+		// Support "CALLSIGN PASSWORD" on a single login line so that logging
+		// software can authenticate in one step (e.g. "MM3NDH mysecret").
+		// The callsign is always the first token; the optional second token is
+		// treated as a spot-submission password attempt.
+		loginTokens := strings.Fields(input)
+		call := strings.ToUpper(loginTokens[0])
 		if !isValidCallsign(call) {
-			fmt.Fprintf(conn, "Sorry %s is an invalid callsign\r\n", input)
-			log.Printf("[telnet] rejected invalid callsign %q from %s", input, remote)
+			fmt.Fprintf(conn, "Sorry %s is an invalid callsign\r\n", loginTokens[0])
+			log.Printf("[telnet] rejected invalid callsign %q from %s", loginTokens[0], remote)
 			return
 		}
 		state.Name = call
 		t.setConnCallsign(connID, call)
-		log.Printf("[telnet] login: %s from %s", call, remote)
+
+		// If a second token was supplied and spot submission is enabled,
+		// attempt password authentication silently. A wrong password is not
+		// an error — the user still connects, just without spot-submission rights.
+		if len(loginTokens) >= 2 && t.spotPassword != "" {
+			given := []byte(loginTokens[1])
+			want := []byte(t.spotPassword)
+			if subtle.ConstantTimeCompare(given, want) == 1 {
+				state.CanSpot = true
+				log.Printf("[telnet] login: %s from %s (spot submission authenticated)", call, remote)
+			} else {
+				log.Printf("[telnet] login: %s from %s (spot password incorrect)", call, remote)
+			}
+		} else {
+			log.Printf("[telnet] login: %s from %s", call, remote)
+		}
 	}
 
 	// ── Banner ─────────────────────────────────────────────────────────────
 	fmt.Fprintf(conn, "Hello de %s DX Cluster\r\n", t.spotterCall)
 	fmt.Fprintf(conn, "Streaming live spots from UberSDR (Digital / CW / Voice / DX Cluster)\r\n")
-	fmt.Fprintf(conn, "Type HELP for a full list of commands, or BYE to disconnect.\r\n\r\n")
+	fmt.Fprintf(conn, "Type HELP for a full list of commands, or BYE to disconnect.\r\n")
+	// If spot submission is enabled and the user is logged in, show an appropriate hint.
+	if t.spotPassword != "" && state.Name != "" {
+		if state.CanSpot {
+			// Already authenticated via the login line password — confirm it.
+			fmt.Fprintf(conn, "Spot submission enabled. Use: DX <freq_kHz> <callsign> [comment]\r\n")
+		} else {
+			// Not yet authenticated — tell them how to enable it.
+			fmt.Fprintf(conn, "To submit spots: SET/SPOTPASS <password> then DX <freq_kHz> <callsign> [comment]\r\n")
+		}
+	}
+	fmt.Fprintf(conn, "\r\n")
 
 	// Subscribe to hub
 	ch := t.hub.Subscribe()
 	defer t.hub.Unsubscribe(ch)
+
+	// ── QRZ welcome lookup (concurrent, non-blocking) ──────────────────────
+	// Fire the lookup immediately after the banner so the client can send
+	// commands freely while the lookup is in flight. The result is injected
+	// into the output stream as a fourth select case when it arrives (≤2s).
+	// qrzCh is nilled after first use so the case never fires again.
+	var qrzCh <-chan *qrzLookupResult
+	if t.ubersdrURL != "" && state.Name != "" {
+		c := make(chan *qrzLookupResult, 1)
+		qrzCh = c
+		go func() {
+			r, _ := lookupQRZ(t.ubersdrURL, state.Name)
+			c <- r // nil on error / not-found
+		}()
+		// Hard 2-second timeout: send nil if the lookup goroutine hasn't fired yet.
+		go func() {
+			time.Sleep(2 * time.Second)
+			select {
+			case c <- nil: // only sends if lookup goroutine hasn't already
+			default:
+			}
+		}()
+	}
 
 	// Read input in a separate goroutine
 	quit := make(chan struct{})
@@ -303,6 +360,13 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 		select {
 		case <-quit:
 			return
+
+		case r := <-qrzCh:
+			// Fire exactly once: nil the channel so this case never triggers again.
+			qrzCh = nil
+			if r != nil {
+				fmt.Fprintf(conn, "%s\r\n", formatLoginWelcome(r))
+			}
 
 		case line := <-cmdCh:
 			// Some clients re-send the callsign as a command after login

@@ -164,6 +164,15 @@ func main() {
 		}
 	}
 
+	// Resolve spot submission password: SPOT_PASSWORD env var
+	// If empty (default), the DX command is disabled entirely.
+	spotPassword := os.Getenv("SPOT_PASSWORD")
+	if spotPassword != "" {
+		log.Printf("  spot submit: enabled (SPOT_PASSWORD set)")
+	} else {
+		log.Printf("  spot submit: disabled (set SPOT_PASSWORD env var to enable)")
+	}
+
 	// Resolve WebSocket terminal limits: WS_MAX_CONNS / WS_MAX_CONNS_PER_IP env vars
 	wsMaxConns := 25
 	if v := os.Getenv("WS_MAX_CONNS"); v != "" {
@@ -233,7 +242,7 @@ func main() {
 		Location: rxLocation,
 		Lat:      rxLat,
 		Lon:      rxLon,
-	}, *ubersdrURL, *requireLogin)
+	}, *ubersdrURL, *requireLogin, spotPassword)
 	go func() {
 		if err := telnet.ListenAndServe(); err != nil {
 			log.Fatalf("telnet server: %v", err)

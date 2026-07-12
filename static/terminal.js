@@ -22,7 +22,7 @@
   // ── DOM references (populated in init) ────────────────────────────────────
 
   let modal, overlay, output, input, sendBtn, connectBtn, disconnectBtn,
-      callsignInput, loginRow, inputRow, statusEl, closeBtn, termOpenBtn;
+      callsignInput, spotpassInput, loginRow, inputRow, statusEl, closeBtn, termOpenBtn;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,7 @@
   // ── Connection ─────────────────────────────────────────────────────────────
 
   const LS_CALLSIGN_KEY = 'ubersdr_terminal_callsign';
+  const LS_SPOTPASS_KEY = 'ubersdr_terminal_spotpass';
 
   function connect() {
     if (ws) return;
@@ -86,9 +87,12 @@
       if (callsignInput) callsignInput.focus();
       return;
     }
-    // Persist callsign so it auto-populates next time
+    const spotpass = spotpassInput ? spotpassInput.value : '';
+    // Persist callsign and spotpass so they auto-populate next time
     try { localStorage.setItem(LS_CALLSIGN_KEY, callsign); } catch (_) {}
-    pendingCallsign = callsign;
+    try { localStorage.setItem(LS_SPOTPASS_KEY, spotpass); } catch (_) {}
+    // Build the login line: "CALLSIGN" or "CALLSIGN PASSWORD"
+    pendingCallsign = spotpass ? callsign + ' ' + spotpass : callsign;
     callsignSent = false;
 
     setStatus('Connecting…', '');
@@ -111,7 +115,7 @@
     ws.onmessage = function (evt) {
       const text = evt.data;
 
-      // Auto-respond to the callsign prompt
+      // Auto-respond to the callsign prompt (pendingCallsign may include a password)
       if (!callsignSent && text.indexOf('callsign') !== -1) {
         callsignSent = true;
         ws.send(pendingCallsign + '\r\n');
@@ -170,6 +174,13 @@
           if (saved) callsignInput.value = saved;
         } catch (_) {}
       }
+      // Restore saved spot password if the field is empty
+      if (spotpassInput && !spotpassInput.value) {
+        try {
+          const savedPass = localStorage.getItem(LS_SPOTPASS_KEY);
+          if (savedPass) spotpassInput.value = savedPass;
+        } catch (_) {}
+      }
       // Scroll output to bottom so the latest content is visible on re-open
       if (output) output.scrollTop = output.scrollHeight;
       if (!connected) {
@@ -202,6 +213,7 @@
     connectBtn    = document.getElementById('term-connect');
     disconnectBtn = document.getElementById('term-disconnect');
     callsignInput = document.getElementById('term-callsign');
+    spotpassInput = document.getElementById('term-spotpass');
     loginRow      = document.getElementById('term-login-row');
     inputRow      = document.getElementById('term-input-row');
     statusEl      = document.getElementById('term-status');
@@ -224,9 +236,14 @@
     if (connectBtn)    connectBtn.addEventListener('click', connect);
     if (disconnectBtn) disconnectBtn.addEventListener('click', disconnect);
 
-    // Callsign input: Enter to connect
+    // Callsign / spotpass inputs: Enter to connect
     if (callsignInput) {
       callsignInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') connect();
+      });
+    }
+    if (spotpassInput) {
+      spotpassInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') connect();
       });
     }

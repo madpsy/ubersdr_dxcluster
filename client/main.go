@@ -42,6 +42,7 @@ const titleDisconnected = "UberSDR DX Cluster"
 // Preference keys (persisted per-OS by Fyne under the app ID).
 const (
 	prefCallsign    = "callsign"
+	prefSpotPass    = "spot_pass" // optional spot-submission password (sent on login line)
 	prefTelnetPort  = "telnet_port"
 	prefAutoConnect = "auto_connect_uuid" // instance UUID / "local" sentinel / "none"
 	prefStartupCmds = "startup_commands"  // newline-separated commands sent after login
@@ -110,6 +111,7 @@ type appUI struct {
 	connDot        *canvas.Circle
 	connDotBox     fyne.CanvasObject
 	callsign       *widget.Entry
+	spotPass       *widget.Entry
 	portEntry      *widget.Entry
 	connectBtn     *widget.Button
 	chooseBtn      *widget.Button
@@ -120,6 +122,7 @@ type appUI struct {
 	audioTuneBtn   *widget.Button
 	flrigBtn       *widget.Button
 	startupCmdsBtn *widget.Button
+	spotBtn        *widget.Button
 	inputEntry     *widget.Entry
 	sendBtn        *widget.Button
 	statusLabel    *widget.Label
@@ -228,6 +231,11 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.callsign.SetText(u.prefs.StringWithFallback(prefCallsign, ""))
 	u.callsign.OnSubmitted = func(string) { u.onConnect() }
 
+	u.spotPass = widget.NewPasswordEntry()
+	u.spotPass.SetPlaceHolder("Pass (optional)")
+	u.spotPass.SetText(u.prefs.StringWithFallback(prefSpotPass, ""))
+	u.spotPass.OnSubmitted = func(string) { u.onConnect() }
+
 	u.portEntry = widget.NewEntry()
 	u.portEntry.SetText(u.prefs.StringWithFallback(prefTelnetPort, defaultTelnetPort))
 
@@ -242,6 +250,8 @@ func (u *appUI) build() fyne.CanvasObject {
 	connectRow := container.NewHBox(
 		widget.NewLabel("Callsign:"),
 		container.NewGridWrap(fyne.NewSize(160, 37), u.callsign),
+		widget.NewLabel("Pass:"),
+		container.NewGridWrap(fyne.NewSize(130, 37), u.spotPass),
 		widget.NewLabel("Telnet port:"),
 		container.NewGridWrap(fyne.NewSize(90, 37), u.portEntry),
 		u.connectBtn,
@@ -306,7 +316,12 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.inputEntry.Disable()
 	u.sendBtn = widget.NewButton("Send", u.sendCommand)
 	u.sendBtn.Disable()
-	inputRow := container.NewBorder(nil, nil, nil, u.sendBtn, u.inputEntry)
+	u.spotBtn = widget.NewButton("Spot…", u.showSpotDialog)
+	u.spotBtn.Disable()
+	inputRow := container.NewBorder(nil, nil, nil,
+		container.NewHBox(u.spotBtn, u.sendBtn),
+		u.inputEntry,
+	)
 
 	center := container.NewBorder(termHeader, inputRow, nil, nil, u.term.scroll)
 
@@ -949,6 +964,11 @@ func (u *appUI) onConnect() {
 		u.setStatus("Enter your callsign first")
 		return
 	}
+	pass := strings.TrimSpace(u.spotPass.Text)
+	// Persist both callsign and spot password
+	u.prefs.SetString(prefCallsign, call)
+	u.prefs.SetString(prefSpotPass, pass)
+
 	port, err := strconv.Atoi(strings.TrimSpace(u.portEntry.Text))
 	if err != nil || port < 1 || port > 65535 {
 		u.setStatus("Invalid telnet port (1–65535)")
@@ -966,7 +986,11 @@ func (u *appUI) onConnect() {
 	u.term.clear()
 	u.term.append(fmt.Sprintf("Connecting to %s (%s)…\r\n", inst.Name, inst.TerminalWSURL()))
 
-	client := u.newClient(inst, call, listener)
+	loginLine := call
+	if pass != "" {
+		loginLine = call + " " + pass
+	}
+	client := u.newClient(inst, loginLine, listener)
 	u.client.Store(client)
 	client.Start()
 	u.maybeAutoConnectAudioClient(inst)
@@ -988,6 +1012,11 @@ func (u *appUI) switchTo(inst Instance) {
 		u.setStatus("Enter your callsign and Connect")
 		return
 	}
+	pass := strings.TrimSpace(u.spotPass.Text)
+	loginLine := call
+	if pass != "" {
+		loginLine = call + " " + pass
+	}
 
 	if old := u.client.Swap(nil); old != nil {
 		go old.Stop() // sends BYE to the previous instance (off UI thread to avoid deadlock)
@@ -999,7 +1028,7 @@ func (u *appUI) switchTo(inst Instance) {
 		u.listener.Broadcast(fmt.Sprintf("\r\n*** Switching to %s ***\r\n", inst.Name))
 	}
 
-	client := u.newClient(inst, call, u.listener)
+	client := u.newClient(inst, loginLine, u.listener)
 	u.client.Store(client)
 	client.Start()
 	u.maybeAutoConnectAudioClient(inst)
@@ -1055,9 +1084,11 @@ func (u *appUI) newListener(port int) *TelnetListener {
 }
 
 // newClient builds a WebSocket client bound to the given (persistent) listener.
-func (u *appUI) newClient(inst Instance, call string, listener *TelnetListener) *DXClusterClient {
+// loginLine is "CALLSIGN" or "CALLSIGN PASSWORD" and is sent verbatim in
+// response to the server's callsign prompt.
+func (u *appUI) newClient(inst Instance, loginLine string, listener *TelnetListener) *DXClusterClient {
 	var c *DXClusterClient
-	c = NewDXClusterClient(inst.TerminalWSURL(), call,
+	c = NewDXClusterClient(inst.TerminalWSURL(), loginLine,
 		func(text string) { // server output
 			// Guard: if this client is no longer the active one (user
 			// disconnected), silently drop the text rather than appending
@@ -1907,12 +1938,75 @@ func (u *appUI) setControlsEnabled(enabled bool) {
 }
 
 func (u *appUI) setInputEnabled(enabled bool) {
-	for _, w := range []fyne.Disableable{u.inputEntry, u.sendBtn} {
+	for _, w := range []fyne.Disableable{u.inputEntry, u.sendBtn, u.spotBtn} {
 		if enabled {
 			w.Enable()
 		} else {
 			w.Disable()
 		}
+	}
+}
+
+// showSpotDialog opens a modal dialog for submitting a DX spot.
+// The user fills in frequency (kHz), callsign, and an optional comment;
+// on confirm the client sends "DX <freq> <callsign> [comment]".
+// If flrig is enabled and connected, the frequency field is pre-populated
+// with the last VFO reading (user can still edit it before sending).
+func (u *appUI) showSpotDialog() {
+	freqEntry := widget.NewEntry()
+	freqEntry.SetPlaceHolder("e.g. 14225.0")
+
+	// Pre-populate freq from flrig if available.
+	focusCall := false
+	if u.flrig != nil {
+		if khz := u.flrig.GetLastFreqKHz(); khz != "" {
+			freqEntry.SetText(khz)
+			focusCall = true
+		}
+	}
+
+	callEntry := widget.NewEntry()
+	callEntry.SetPlaceHolder("e.g. G1TLH")
+
+	commentEntry := widget.NewEntry()
+	commentEntry.SetPlaceHolder("optional, max 50 chars")
+
+	form := widget.NewForm(
+		widget.NewFormItem("Freq (kHz)", freqEntry),
+		widget.NewFormItem("Callsign", callEntry),
+		widget.NewFormItem("Comment", commentEntry),
+	)
+
+	dlg := dialog.NewCustomConfirm("Submit DX Spot", "Send", "Cancel", form, func(ok bool) {
+		if !ok {
+			return
+		}
+		freq := strings.TrimSpace(freqEntry.Text)
+		call := strings.ToUpper(strings.TrimSpace(callEntry.Text))
+		comment := strings.TrimSpace(commentEntry.Text)
+		if freq == "" || call == "" {
+			dialog.ShowError(fmt.Errorf("frequency and callsign are required"), u.win)
+			return
+		}
+		cmd := "DX " + freq + " " + call
+		if comment != "" {
+			cmd += " " + comment
+		}
+		c := u.client.Load()
+		if c == nil {
+			dialog.ShowError(fmt.Errorf("not connected"), u.win)
+			return
+		}
+		u.term.append("> " + cmd + "\r\n")
+		_ = c.Send(cmd)
+	}, u.win)
+	dlg.Resize(fyne.NewSize(400, 220))
+	dlg.Show()
+	// Focus callsign when freq is pre-filled; otherwise focus freq.
+	if focusCall {
+		u.win.Canvas().Focus(callEntry)
+	} else {
+		u.win.Canvas().Focus(freqEntry)
 	}
 }
 

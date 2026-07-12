@@ -728,6 +728,7 @@ type ClientState struct {
 	WantVoice     bool // receive voice activity spots
 	WantDXCluster bool // receive DX cluster spots
 	Name          string
+	CanSpot       bool // true after successful SET/SPOTPASS authentication
 }
 
 func newClientState() *ClientState {

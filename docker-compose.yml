@@ -44,6 +44,15 @@ services:
       # Maximum simultaneous web-terminal sessions from a single IP address (default: 2)
       # WS_MAX_CONNS_PER_IP: "2"
       #
+      # Password required to submit spots via the DX command (default: disabled)
+      # Set to a non-empty string to allow authenticated users to submit manual spots.
+      # After login, users must send SET/SPOTPASS <password> to enable submission.
+      # Spots are validated (10 kHz – 30 MHz, valid callsign) before being broadcast
+      # to all connected clients and saved to the database.
+      # WARNING: the password travels in plaintext over raw telnet; the WebSocket
+      # terminal (HTTPS) is strongly preferred for spot submission.
+      # SPOT_PASSWORD: "changeme"
+      #
       # Note: reverse-proxy base path is read automatically from
       # the X-Forwarded-Prefix header — no configuration needed.
     ports:

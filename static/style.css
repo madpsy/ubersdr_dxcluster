@@ -160,6 +160,7 @@ header {
 .hdr-spacer { flex: 1; }
 
 .stat-pill {
+  position: relative;
   display: flex; align-items: center; gap: 6px;
   padding: 4px 12px; border-radius: 20px;
   background: var(--surface2); border: 1px solid var(--border);
@@ -173,11 +174,8 @@ header {
 
 .client-ip-tip {
   display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
+  position: fixed;
+  z-index: 9999;
   background: var(--surface);
   border: 1px solid var(--border2);
   border-radius: 6px;
@@ -529,6 +527,12 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
   padding: 4px 8px; width: 120px; text-transform: uppercase;
 }
 .term-callsign-input:focus { outline: none; border-color: var(--blue); }
+.term-spotpass-input {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 4px; color: var(--fg); font-size: 13px;
+  padding: 4px 8px; width: 100px;
+}
+.term-spotpass-input:focus { outline: none; border-color: var(--blue); }
 .term-disconnect-btn {
   background: none; border: 1px solid var(--red, #f85149); border-radius: 4px;
   color: var(--red, #f85149); font-size: 11px; padding: 3px 10px;

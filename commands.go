@@ -1,11 +1,41 @@
 package main
 
 import (
+	"crypto/subtle"
 	"fmt"
+	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ── Spot submission constants ──────────────────────────────────────────────
+
+const (
+	// spotMinKHz / spotMaxKHz define the valid frequency range for user-submitted spots.
+	// 10 kHz (LF lower bound) to 30 MHz (HF upper bound), expressed in kHz.
+	spotMinKHz = 10.0
+	spotMaxKHz = 30000.0
+
+	// spotMaxCommentLen is the maximum length of a spot comment after sanitisation.
+	spotMaxCommentLen = 50
+)
+
+// spotCommentSanitise strips control characters and trims the comment to
+// spotMaxCommentLen runes. Tabs are converted to a single space.
+var spotControlRe = regexp.MustCompile(`[\x00-\x08\x0a-\x1f\x7f]`)
+
+func sanitiseSpotComment(s string) string {
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = spotControlRe.ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) > spotMaxCommentLen {
+		runes = runes[:spotMaxCommentLen]
+	}
+	return strings.TrimSpace(string(runes))
+}
 
 // ── Abbreviation expansion ─────────────────────────────────────────────────
 
@@ -287,9 +317,125 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 			return fmt.Sprintf("Unknown filter field %q - type HELP for usage", field)
 		}
 
+	// ── Spot submission ────────────────────────────────────────────────────
+
+	// set/spotpass <password> — authenticate the session for spot submission.
+	case "set/spotpass":
+		if t.spotPassword == "" {
+			return "Spot submission has not been enabled by the administrator."
+		}
+		if len(parts) < 2 {
+			return "Usage: SET/SPOTPASS <password>"
+		}
+		// Constant-time comparison to prevent timing attacks.
+		given := []byte(parts[1])
+		want := []byte(t.spotPassword)
+		if subtle.ConstantTimeCompare(given, want) == 1 {
+			state.CanSpot = true
+			return "Spot submission enabled. Use: DX <freq_kHz> <callsign> [comment]"
+		}
+		return "Incorrect password."
+
+	// dx <freq_kHz> <callsign> [comment] — submit a manual DX spot.
+	case "dx":
+		return t.handleDX(parts[1:], state)
+
 	default:
 		return fmt.Sprintf("Unknown command %q - type HELP for a list of commands", parts[0])
 	}
+}
+
+// ── DX spot submission ─────────────────────────────────────────────────────
+
+// handleDX parses and validates a user-submitted DX spot, then publishes it
+// to the hub (which broadcasts it to all subscribers and persists it to the DB).
+//
+// Syntax (Spider-compatible — freq and callsign accepted in either order):
+//
+//	DX <freq_kHz> <callsign> [comment]
+//	DX <callsign> <freq_kHz> [comment]
+//
+// Frequency must be in the range 10 kHz – 30 MHz (expressed in kHz).
+// Callsign must pass the standard amateur callsign regex.
+// Comment is optional; control characters are stripped and length is capped.
+func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
+	// ── 1. Spot submission enabled? ────────────────────────────────────────
+	if t.spotPassword == "" {
+		return "Spot submission has not been enabled by the administrator."
+	}
+	if !state.CanSpot {
+		return "You must authenticate first: SET/SPOTPASS <password>"
+	}
+	if state.Name == "" {
+		return "You must be logged in with a valid callsign to submit spots."
+	}
+	if len(args) < 2 {
+		return "Usage: DX <freq_kHz> <callsign> [comment]"
+	}
+
+	// ── 2. Parse freq + callsign (either order, Spider-compatible) ─────────
+	var freqKHz float64
+	var dxCall string
+	var commentArgs []string
+
+	f0, err0 := strconv.ParseFloat(args[0], 64)
+	f1, err1 := strconv.ParseFloat(args[1], 64)
+
+	switch {
+	case err0 == nil && err1 != nil:
+		// args[0] is freq, args[1] is callsign
+		freqKHz = f0
+		dxCall = args[1]
+		commentArgs = args[2:]
+	case err0 != nil && err1 == nil:
+		// args[0] is callsign, args[1] is freq
+		dxCall = args[0]
+		freqKHz = f1
+		commentArgs = args[2:]
+	case err0 == nil && err1 == nil:
+		// Both parse as numbers — treat first as freq, second as callsign (invalid call caught below)
+		freqKHz = f0
+		dxCall = args[1]
+		commentArgs = args[2:]
+	default:
+		return "Usage: DX <freq_kHz> <callsign> [comment]"
+	}
+
+	// ── 3. Frequency validation: 10 kHz – 30 MHz ──────────────────────────
+	if freqKHz < spotMinKHz || freqKHz > spotMaxKHz {
+		return fmt.Sprintf("%.1f kHz is outside the valid range (10 kHz – 30 MHz)", freqKHz)
+	}
+
+	// ── 4. Callsign validation ─────────────────────────────────────────────
+	dxCall = strings.ToUpper(strings.TrimSpace(dxCall))
+	if !isValidCallsign(dxCall) {
+		return fmt.Sprintf("%s is not a valid callsign", dxCall)
+	}
+
+	// ── 5. Comment sanitisation ────────────────────────────────────────────
+	comment := sanitiseSpotComment(strings.Join(commentArgs, " "))
+
+	// ── 6. Build and publish the spot ──────────────────────────────────────
+	freqHz := freqKHz * 1000.0
+	spot := Spot{
+		Stream:    StreamDXCluster,
+		Timestamp: time.Now().UTC(),
+		FreqHz:    freqHz,
+		Band:      bandForSpot(freqHz),
+		Callsign:  dxCall,
+		Spotter:   state.Name,
+		Comment:   comment,
+	}
+
+	t.hub.Publish(spot)
+
+	log.Printf("[spot] %s submitted: %.1f kHz %s %q", state.Name, freqKHz, dxCall, comment)
+
+	commentPart := ""
+	if comment != "" {
+		commentPart = " " + comment
+	}
+	return fmt.Sprintf("DX de %s: %.1f %s%s", state.Name, freqKHz, dxCall, commentPart)
 }
 
 // parseSlotArgs extracts an optional leading slot number (0-9) from args,

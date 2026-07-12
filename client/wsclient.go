@@ -24,17 +24,18 @@ const (
 )
 
 // DXClusterClient maintains a WebSocket connection to a single instance's
-// DX cluster terminal, auto-logs in with a callsign, relays every chunk of
+// DX cluster terminal, auto-logs in with a login line, relays every chunk of
 // received text to a sink, and reconnects automatically until stopped.
 //
 // The terminal protocol is plain text over WebSocket (identical to the web
 // UI's terminal): on connect the server prints a banner ending in a line that
-// contains the word "callsign"; the client replies with "<CALLSIGN>\r\n" and
-// then receives a continuous stream of DX spots. Commands may be sent at any
-// time as "<line>\r\n"; "bye\r\n" ends the session cleanly.
+// contains the word "callsign"; the client replies with "<CALLSIGN>\r\n" (or
+// "<CALLSIGN> <PASSWORD>\r\n" when spot submission is enabled) and then
+// receives a continuous stream of DX spots. Commands may be sent at any time
+// as "<line>\r\n"; "bye\r\n" ends the session cleanly.
 type DXClusterClient struct {
-	url      string
-	callsign string
+	url       string
+	loginLine string // "CALLSIGN" or "CALLSIGN PASSWORD"
 
 	onText     func(string)       // every chunk of server text
 	onStatus   func(string, bool) // human status message, connected?
@@ -49,15 +50,18 @@ type DXClusterClient struct {
 }
 
 // NewDXClusterClient creates a client for the given terminal WebSocket URL.
+// loginLine is the string sent in response to the server's callsign prompt;
+// it is typically just the callsign ("MM3NDH") but may include a spot-
+// submission password as a second token ("MM3NDH mypassword").
 // onText receives raw server output; onStatus receives connection-state
 // changes. Both callbacks are invoked from the client's own goroutine, so any
 // UI work inside them must be marshalled onto the UI thread by the caller.
-func NewDXClusterClient(url, callsign string, onText func(string), onStatus func(string, bool)) *DXClusterClient {
+func NewDXClusterClient(url, loginLine string, onText func(string), onStatus func(string, bool)) *DXClusterClient {
 	return &DXClusterClient{
-		url:      url,
-		callsign: callsign,
-		onText:   onText,
-		onStatus: onStatus,
+		url:       url,
+		loginLine: loginLine,
+		onText:    onText,
+		onStatus:  onStatus,
 	}
 }
 
@@ -211,9 +215,10 @@ func (c *DXClusterClient) connectOnce() (bool, error) {
 		lower := strings.ToLower(text)
 
 		// Auto-respond to the callsign prompt (matches the web UI logic).
+		// loginLine may be "CALLSIGN" or "CALLSIGN PASSWORD".
 		if !callsignSent && strings.Contains(lower, "callsign") {
 			callsignSent = true
-			_ = c.sendRaw(c.callsign + "\r\n")
+			_ = c.sendRaw(c.loginLine + "\r\n")
 		}
 
 		// Fire onLoggedIn after the server sends the post-login banner.

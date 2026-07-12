@@ -105,6 +105,24 @@ CLEARING SLOT FILTERS
   clear/spots [N|all]           Clear accept/reject spot filter slot N (or all slots)
   clear/rbn [N|all]             Clear accept/reject RBN filter slot N (or all slots)
 
+SPOT SUBMISSION  (requires SPOT_PASSWORD to be set by the administrator)
+  set/spotpass <password>       Authenticate this session for spot submission.
+                                  Once authenticated, you may use the DX command.
+                                  If spot submission is not enabled, you will be
+                                  told so when you try SET/SPOTPASS or DX.
+
+  dx <freq_kHz> <callsign>      Submit a manual DX spot (freq and callsign can
+  dx <callsign> <freq_kHz>        be in either order). An optional comment may
+    [comment]                     follow the callsign.
+                                  Frequency must be 10 kHz – 30 MHz (in kHz).
+                                  Callsign must be a valid amateur callsign.
+                                  The spot is broadcast to all connected clients
+                                  and saved to the database immediately.
+                                  Examples:
+                                    dx 14033.5 DK8MM IOTA EU-064
+                                    dx DK8MM 14033.5
+                                    dx 7033 G3ABC/P
+
 SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/dx                        Enable ALL spots (DX Spider compat, default: on)
   unset/dx                      Disable ALL spots

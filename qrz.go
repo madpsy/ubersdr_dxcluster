@@ -179,6 +179,46 @@ func formatQRZ(r *qrzLookupResult) string {
 	return b.String()
 }
 
+// formatLoginWelcome builds a personalised greeting from a QRZ lookup result.
+// It degrades gracefully: name+location → name only → location only → callsign only.
+// Location is assembled from city (Addr2), state, and country, skipping empty parts.
+// Falls back to the CTY country when QRZ has no country field.
+func formatLoginWelcome(r *qrzLookupResult) string {
+	// Prefer pre-formatted name_fmt; fall back to fname + name.
+	name := r.NameFmt
+	if name == "" {
+		name = strings.TrimSpace(r.FName + " " + r.Name)
+	}
+
+	// Build location from available address fields.
+	var locParts []string
+	if r.Addr2 != "" {
+		locParts = append(locParts, r.Addr2)
+	}
+	if r.State != "" {
+		locParts = append(locParts, r.State)
+	}
+	if r.Country != "" {
+		locParts = append(locParts, r.Country)
+	}
+	// Fall back to CTY country when QRZ has no country field.
+	if len(locParts) == 0 && r.CTY != nil && r.CTY.Country != "" {
+		locParts = append(locParts, r.CTY.Country)
+	}
+	loc := strings.Join(locParts, ", ")
+
+	switch {
+	case name != "" && loc != "":
+		return fmt.Sprintf("Welcome, %s (%s) from %s", name, r.Call, loc)
+	case name != "":
+		return fmt.Sprintf("Welcome, %s (%s)", name, r.Call)
+	case loc != "":
+		return fmt.Sprintf("Welcome, %s from %s", r.Call, loc)
+	default:
+		return fmt.Sprintf("Welcome, %s", r.Call)
+	}
+}
+
 // zoneOr returns primary if non-zero, else fallback.
 func zoneOr(primary, fallback int) int {
 	if primary != 0 {
