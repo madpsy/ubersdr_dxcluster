@@ -270,20 +270,27 @@ function updateClientTooltip(clients) {
   const clientsEl = document.getElementById('hdr-telnet-clients');
   if (!clientsEl) return;
 
-  // Find or create the tooltip element
+  // Find or create the tooltip element.
+  // Appended to <body> so it is outside the header's stacking context and
+  // cannot be obscured by the filter card below the header.
   let tip = document.getElementById('client-ip-tip');
   if (!tip) {
     tip = document.createElement('div');
     tip.id = 'client-ip-tip';
     tip.className = 'client-ip-tip';
-    // Insert after the clients element inside the pill
-    clientsEl.parentNode.insertBefore(tip, clientsEl.nextSibling);
+    document.body.appendChild(tip);
 
-    // Show/hide on hover of the whole pill
+    // Show/hide on hover of the whole pill; position via getBoundingClientRect
+    // so the fixed tooltip aligns with the pill regardless of scroll position.
     const pill = document.getElementById('telnet-pill');
     if (pill) {
       pill.addEventListener('mouseenter', () => {
-        if (tip.childNodes.length > 0) tip.classList.add('visible');
+        if (tip.childNodes.length === 0) return;
+        const r = pill.getBoundingClientRect();
+        tip.style.left = Math.round(r.left + r.width / 2) + 'px';
+        tip.style.top  = Math.round(r.bottom + 8) + 'px';
+        tip.style.transform = 'translateX(-50%)';
+        tip.classList.add('visible');
       });
       pill.addEventListener('mouseleave', () => {
         tip.classList.remove('visible');
@@ -350,6 +357,7 @@ function onSpot(spot, live) {
     case 'cwskimmer': onCW(spot, live);       break;
     case 'voice':     onVoice(spot, live);    break;
     case 'dxcluster': onDXSpot(spot, live);   break;
+    case 'localspot': onDXSpot(spot, live);   break; // user-submitted spots
   }
 }
 
@@ -360,6 +368,7 @@ const STREAM_LABELS = {
   cwskimmer: { label: 'CW',      cls: 'type-cw'      },
   voice:     { label: 'Voice',   cls: 'type-voice'   },
   dxcluster: { label: 'DX',      cls: 'type-dx'      },
+  localspot: { label: 'DX',      cls: 'type-dx'      }, // user-submitted spots
 };
 
 function onAllSpot(spot, live) {

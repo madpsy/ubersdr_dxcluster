@@ -394,6 +394,35 @@
              maxlength="512" autocomplete="off" spellcheck="false"
              placeholder="Type a command and press Enter…">
       <button id="term-send" class="term-send-btn">Send</button>
+      <button id="term-spot-btn" class="term-spot-btn" title="Submit a DX spot">Spot</button>
+    </div>
+
+    <!-- Spot submission modal (shown on Spot… click) -->
+    <div id="term-spot-overlay" class="term-spot-overlay" style="display:none">
+      <div class="term-spot-modal">
+        <div class="term-spot-hdr">
+          <span>Submit DX Spot</span>
+          <button class="term-close-x" onclick="closeSpotModal()">&times;</button>
+        </div>
+        <div class="term-spot-body">
+          <label class="term-spot-label" for="spot-freq">Freq (kHz)</label>
+          <input id="spot-freq" class="term-spot-input" type="text"
+                 maxlength="12" autocomplete="off" spellcheck="false"
+                 placeholder="e.g. 14225.0">
+          <label class="term-spot-label" for="spot-call">Callsign</label>
+          <input id="spot-call" class="term-spot-input" type="text"
+                 maxlength="20" autocomplete="off" spellcheck="false"
+                 placeholder="e.g. G1TLH">
+          <label class="term-spot-label" for="spot-comment">Comment</label>
+          <input id="spot-comment" class="term-spot-input" type="text"
+                 maxlength="50" autocomplete="off" spellcheck="false"
+                 placeholder="optional, max 50 chars">
+        </div>
+        <div class="term-spot-footer">
+          <button id="term-spot-send" class="term-connect-btn">Send Spot</button>
+          <button class="term-disconnect-btn" onclick="closeSpotModal()">Cancel</button>
+        </div>
+      </div>
     </div>
 
   </div>

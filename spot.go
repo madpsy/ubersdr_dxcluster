@@ -15,26 +15,31 @@ const (
 	StreamCWSkimmer     StreamType = "cwskimmer"
 	StreamVoiceActivity StreamType = "voice"
 	StreamDXCluster     StreamType = "dxcluster"
+	// StreamLocalSpot is used for spots submitted by connected clients via the
+	// DX command. Unlike StreamDXCluster (which is gated by WantDXCluster),
+	// locally submitted spots are delivered to ALL connected clients regardless
+	// of their stream preferences — they are always relevant to the cluster.
+	StreamLocalSpot StreamType = "localspot"
 )
 
 // Spot is the unified internal representation of any incoming event.
 // Fields are a superset of all three stream types; unused fields are zero.
 type Spot struct {
 	// Common
-	Stream    StreamType `json:"stream"`
-	Timestamp time.Time  `json:"timestamp"`
-	Band      string     `json:"band"`
-	Callsign  string     `json:"callsign"` // dx_callsign for voice; "N0CALL" if absent
-	FreqHz    float64    `json:"freq_hz"`
-	SNR       float64    `json:"snr"`
-	Country   string     `json:"country,omitempty"`
-	CountryCode string   `json:"country_code,omitempty"`
-	Continent string     `json:"continent,omitempty"`
+	Stream      StreamType `json:"stream"`
+	Timestamp   time.Time  `json:"timestamp"`
+	Band        string     `json:"band"`
+	Callsign    string     `json:"callsign"` // dx_callsign for voice; "N0CALL" if absent
+	FreqHz      float64    `json:"freq_hz"`
+	SNR         float64    `json:"snr"`
+	Country     string     `json:"country,omitempty"`
+	CountryCode string     `json:"country_code,omitempty"`
+	Continent   string     `json:"continent,omitempty"`
 
 	// Decoder-specific
-	Mode     string `json:"mode,omitempty"`
-	Locator  string `json:"locator,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	Locator string `json:"locator,omitempty"`
+	Message string `json:"message,omitempty"`
 
 	// CW-specific
 	Spotter string `json:"spotter,omitempty"`
@@ -67,10 +72,22 @@ type Spot struct {
 //	DX de M9PSY-#:   14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
 func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 	var spotter string
-	if s.Stream == StreamDXCluster && s.Spotter != "" {
-		// Real DX cluster spot — use the original spotter as-is
-		spotter = s.Spotter
-	} else {
+	switch s.Stream {
+	case StreamDXCluster:
+		// Real upstream DX cluster spot — use the original spotter as-is
+		if s.Spotter != "" {
+			spotter = s.Spotter
+		} else {
+			spotter = defaultSpotter + "-#"
+		}
+	case StreamLocalSpot:
+		// Locally submitted spot — use the submitting user's callsign
+		if s.Spotter != "" {
+			spotter = s.Spotter
+		} else {
+			spotter = defaultSpotter
+		}
+	default:
 		// Our own skimmer spots — use receiver callsign with "-#" suffix
 		spotter = defaultSpotter + "-#"
 	}
@@ -88,7 +105,7 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, s.Comment)
 	case StreamVoiceActivity:
 		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
-	case StreamDXCluster:
+	case StreamDXCluster, StreamLocalSpot:
 		// Strip any trailing HHMMZ timestamp from the comment — the upstream
 		// cluster sometimes includes it in the comment field, but we already
 		// append our own timestamp at the end of the line.
@@ -142,20 +159,20 @@ type cwSpotEvent struct {
 }
 
 type voiceActivityEvent struct {
-	Type            string  `json:"type"`
-	Band            string  `json:"band"`
-	Timestamp       string  `json:"timestamp"`
-	EstimatedDialFreq int   `json:"estimated_dial_freq"`
-	Mode            string  `json:"mode"`
-	SNR             float64 `json:"snr"`
-	Confidence      float64 `json:"confidence"`
-	AvgSignalDB     float64 `json:"avg_signal_db"`
-	PeakSignalDB    float64 `json:"peak_signal_db"`
-	Bandwidth       int     `json:"bandwidth"`
-	DXCallsign      string  `json:"dx_callsign"`
-	DXCountry       string  `json:"dx_country"`
-	DXCountryCode   string  `json:"dx_country_code"`
-	DXContinent     string  `json:"dx_continent"`
+	Type              string  `json:"type"`
+	Band              string  `json:"band"`
+	Timestamp         string  `json:"timestamp"`
+	EstimatedDialFreq int     `json:"estimated_dial_freq"`
+	Mode              string  `json:"mode"`
+	SNR               float64 `json:"snr"`
+	Confidence        float64 `json:"confidence"`
+	AvgSignalDB       float64 `json:"avg_signal_db"`
+	PeakSignalDB      float64 `json:"peak_signal_db"`
+	Bandwidth         int     `json:"bandwidth"`
+	DXCallsign        string  `json:"dx_callsign"`
+	DXCountry         string  `json:"dx_country"`
+	DXCountryCode     string  `json:"dx_country_code"`
+	DXContinent       string  `json:"dx_continent"`
 }
 
 // stripTrailingTime removes a trailing HHMMZ time token from a comment string.
@@ -237,7 +254,7 @@ var bandRanges = []struct {
 	{"17m", 18068000, 18168000},
 	{"15m", 21000000, 21450000},
 	{"12m", 24890000, 24990000},
-	{"11m", 26965000, 27405000},  // CB band
+	{"11m", 26965000, 27405000}, // CB band
 	{"10m", 28000000, 29700000},
 	{"6m", 50000000, 54000000},
 }

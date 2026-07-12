@@ -160,7 +160,6 @@ header {
 .hdr-spacer { flex: 1; }
 
 .stat-pill {
-  position: relative;
   display: flex; align-items: center; gap: 6px;
   padding: 4px 12px; border-radius: 20px;
   background: var(--surface2); border: 1px solid var(--border);
@@ -547,6 +546,46 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 }
 .term-connect-btn:hover { opacity: 0.85; }
 .term-connect-btn:disabled { opacity: 0.4; cursor: default; }
+
+.term-spot-btn {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 4px;
+  color: var(--fg); font-size: 12px; font-weight: 600;
+  padding: 5px 12px; cursor: pointer; transition: opacity 0.2s; flex-shrink: 0;
+}
+.term-spot-btn:hover { opacity: 0.8; }
+.term-spot-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Spot submission modal */
+.term-spot-overlay {
+  position: absolute; inset: 0; z-index: 10;
+  background: rgba(0,0,0,0.55); border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.term-spot-modal {
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  width: 320px; display: flex; flex-direction: column;
+}
+.term-spot-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 600;
+}
+.term-spot-body {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px 10px;
+  align-items: center; padding: 14px;
+}
+.term-spot-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.term-spot-input {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 4px; color: var(--fg); font-size: 13px;
+  padding: 4px 8px; width: 100%; box-sizing: border-box;
+}
+.term-spot-input:focus { outline: none; border-color: var(--blue); }
+.term-spot-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 10px 14px; border-top: 1px solid var(--border);
+}
 
 .term-output {
   flex: 1; overflow-y: auto; overflow-x: auto;

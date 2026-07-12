@@ -418,7 +418,10 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 	// ── 6. Build and publish the spot ──────────────────────────────────────
 	freqHz := freqKHz * 1000.0
 	spot := Spot{
-		Stream:    StreamDXCluster,
+		// StreamLocalSpot bypasses the WantDXCluster gate in ShouldSend so
+		// the spot is delivered to ALL connected clients, not just those that
+		// have opted in to the upstream DX cluster feed.
+		Stream:    StreamLocalSpot,
 		Timestamp: time.Now().UTC(),
 		FreqHz:    freqHz,
 		Band:      bandForSpot(freqHz),
@@ -431,11 +434,10 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 
 	log.Printf("[spot] %s submitted: %.1f kHz %s %q", state.Name, freqKHz, dxCall, comment)
 
-	commentPart := ""
-	if comment != "" {
-		commentPart = " " + comment
-	}
-	return fmt.Sprintf("DX de %s: %.1f %s%s", state.Name, freqKHz, dxCall, commentPart)
+	// Return empty string: the hub fans the spot out to all subscribers
+	// (including the submitting client) via the normal spot-stream path.
+	// StreamLocalSpot bypasses WantDXCluster so every client receives it.
+	return ""
 }
 
 // parseSlotArgs extracts an optional leading slot number (0-9) from args,

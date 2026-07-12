@@ -189,6 +189,18 @@ func (f *FlrigSync) GetLastFreqKHz() string {
 	return fmt.Sprintf("%.3f", khz)
 }
 
+// GetLastMode returns the last mode read from flrig in flrig's own format
+// (e.g. "USB", "LSB", "CW"). Returns "" if flrig is disabled, not connected,
+// or no mode has been read yet.
+func (f *FlrigSync) GetLastMode() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.enabled || !f.connected {
+		return ""
+	}
+	return f.lastFlrigMode
+}
+
 // Start launches the background poll and reconnect goroutines.
 // Safe to call multiple times — subsequent calls are no-ops if already running.
 func (f *FlrigSync) Start() {
@@ -420,14 +432,25 @@ func (f *FlrigSync) poll() error {
 		}
 	}
 
-	// Rig→SDR: only push if direction allows and we're outside the cooldown window.
+	// Always cache the latest freq/mode read from the rig so that
+	// GetLastFreqKHz() / GetLastMode() work regardless of sync direction.
+	// This is needed for the spot dialog pre-fill even in "sdr-to-rig" mode.
 	f.mu.Lock()
 	direction := f.direction
 	inCooldown := time.Since(f.sdrToRigPushTime) < flrigEchoCooldown
 	lastFlrigFreq := f.lastFlrigFreq
 	lastFlrigMode := f.lastFlrigMode
+	freqChanged := lastFlrigFreq == 0 || freq != lastFlrigFreq
+	modeChanged := modeRaw != "" && modeRaw != lastFlrigMode
+	if freqChanged {
+		f.lastFlrigFreq = freq
+	}
+	if modeChanged {
+		f.lastFlrigMode = modeRaw
+	}
 	f.mu.Unlock()
 
+	// Rig→SDR: only push if direction allows and we're outside the cooldown window.
 	if direction == "rig-to-sdr" || direction == "both" {
 		if inCooldown {
 			return nil
@@ -435,8 +458,7 @@ func (f *FlrigSync) poll() error {
 
 		// On the very first poll after (re)connect, skip the rig→SDR push so
 		// the SDR's saved preferences are not overwritten by the rig's current
-		// state.  We still update lastFlrigFreq/Mode so subsequent polls can
-		// detect real changes.
+		// state.
 		f.mu.Lock()
 		skipFirst := f.skipFirstRigToSDR
 		if skipFirst {
@@ -444,21 +466,6 @@ func (f *FlrigSync) poll() error {
 		}
 		f.mu.Unlock()
 
-		freqChanged := lastFlrigFreq == 0 || freq != lastFlrigFreq
-		modeChanged := modeRaw != "" && modeRaw != lastFlrigMode
-
-		// Always update the cached last-seen values so the next poll can detect
-		// genuine changes, but only fire OnFreqMode if this is not the first poll.
-		if freqChanged {
-			f.mu.Lock()
-			f.lastFlrigFreq = freq
-			f.mu.Unlock()
-		}
-		if modeChanged {
-			f.mu.Lock()
-			f.lastFlrigMode = modeRaw
-			f.mu.Unlock()
-		}
 		if skipFirst {
 			return nil
 		}

@@ -123,7 +123,7 @@ type appUI struct {
 	flrigBtn       *widget.Button
 	startupCmdsBtn *widget.Button
 	spotBtn        *widget.Button
-	inputEntry     *widget.Entry
+	inputEntry     *commandEntry
 	sendBtn        *widget.Button
 	statusLabel    *widget.Label
 	telnetLabel    *widget.Label
@@ -227,11 +227,16 @@ func (u *appUI) build() fyne.CanvasObject {
 	)
 
 	u.callsign = widget.NewEntry()
+	u.callsign.Wrapping = fyne.TextWrapOff
+	u.callsign.Scroll = fyne.ScrollNone
 	u.callsign.SetPlaceHolder("Callsign")
 	u.callsign.SetText(u.prefs.StringWithFallback(prefCallsign, ""))
 	u.callsign.OnSubmitted = func(string) { u.onConnect() }
 
 	u.spotPass = widget.NewPasswordEntry()
+	u.spotPass.ActionItem = nil // remove the reveal button so it fits in the fixed-width container
+	u.spotPass.Wrapping = fyne.TextWrapOff
+	u.spotPass.Scroll = fyne.ScrollNone
 	u.spotPass.SetPlaceHolder("Pass (optional)")
 	u.spotPass.SetText(u.prefs.StringWithFallback(prefSpotPass, ""))
 	u.spotPass.OnSubmitted = func(string) { u.onConnect() }
@@ -249,7 +254,7 @@ func (u *appUI) build() fyne.CanvasObject {
 
 	connectRow := container.NewHBox(
 		widget.NewLabel("Callsign:"),
-		container.NewGridWrap(fyne.NewSize(160, 37), u.callsign),
+		container.NewGridWrap(fyne.NewSize(80, 37), u.callsign),
 		widget.NewLabel("Pass:"),
 		container.NewGridWrap(fyne.NewSize(130, 37), u.spotPass),
 		widget.NewLabel("Telnet port:"),
@@ -310,16 +315,20 @@ func (u *appUI) build() fyne.CanvasObject {
 	// Command input row — mirrors the Python client. Commands are sent to the
 	// same WebSocket session that feeds the telnet listener, so telnet clients
 	// see the resulting server output too.
-	u.inputEntry = widget.NewEntry()
+	u.inputEntry = newCommandEntry(func() {
+		if u.spotBtn != nil && !u.spotBtn.Disabled() {
+			u.showSpotDialog()
+		}
+	})
 	u.inputEntry.SetPlaceHolder("Type a command (e.g. SH/DX, HELP, BYE) and press Enter")
 	u.inputEntry.OnSubmitted = func(string) { u.sendCommand() }
 	u.inputEntry.Disable()
 	u.sendBtn = widget.NewButton("Send", u.sendCommand)
 	u.sendBtn.Disable()
-	u.spotBtn = widget.NewButton("Spot…", u.showSpotDialog)
+	u.spotBtn = widget.NewButton("Spot", u.showSpotDialog)
 	u.spotBtn.Disable()
 	inputRow := container.NewBorder(nil, nil, nil,
-		container.NewHBox(u.spotBtn, u.sendBtn),
+		container.NewHBox(u.sendBtn, u.spotBtn),
 		u.inputEntry,
 	)
 
@@ -346,6 +355,32 @@ func (u *appUI) build() fyne.CanvasObject {
 	u.setControlsEnabled(true)
 
 	return container.NewBorder(toolbar, bottom, nil, nil, center)
+}
+
+// commandEntry is a single-line Entry that intercepts Ctrl+S to open the
+// Spot dialog, forwarding all other shortcuts to the standard Entry handler.
+type commandEntry struct {
+	widget.Entry
+	onCtrlS func()
+}
+
+func newCommandEntry(onCtrlS func()) *commandEntry {
+	e := &commandEntry{onCtrlS: onCtrlS}
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+// TypedShortcut intercepts Ctrl+S; all other shortcuts are handled normally.
+func (e *commandEntry) TypedShortcut(s fyne.Shortcut) {
+	if ks, ok := s.(fyne.KeyboardShortcut); ok &&
+		ks.Key() == fyne.KeyS &&
+		ks.Mod() == fyne.KeyModifierControl {
+		if e.onCtrlS != nil {
+			e.onCtrlS()
+		}
+		return
+	}
+	e.Entry.TypedShortcut(s)
 }
 
 // ── Instance directory ─────────────────────────────────────────────────────
@@ -1181,7 +1216,9 @@ You can then connect to ` + "`localhost:7300`" + ` with **telnet** or your favou
 
 **Auto-connect:** if this program's filename contains an instance callsign (e.g. ` + "`dxcluster_m0abc`" + ` or ` + "`dxcluster_m0abc.exe`" + `), it will connect to that instance automatically on first launch and tick the *Auto-connect on startup* checkbox for you.
 
-**Startup Commands:** use the *Commands…* button to enter commands sent automatically after login — one per line (e.g. ` + "`set/digital`" + `, ` + "`set/filter band 20m`" + `).`)
+**Startup Commands:** use the *Commands…* button to enter commands sent automatically after login — one per line (e.g. ` + "`set/digital`" + `, ` + "`set/filter band 20m`" + `).
+
+**Keyboard shortcuts:** Ctrl+S — open the Spot submission dialog.`)
 	intro.Wrapping = fyne.TextWrapWord
 
 	cmdRef := widget.NewLabel(helpText)
@@ -1956,7 +1993,7 @@ func (u *appUI) showSpotDialog() {
 	freqEntry := widget.NewEntry()
 	freqEntry.SetPlaceHolder("e.g. 14225.0")
 
-	// Pre-populate freq from flrig if available.
+	// Pre-populate freq and comment from flrig if available.
 	focusCall := false
 	if u.flrig != nil {
 		if khz := u.flrig.GetLastFreqKHz(); khz != "" {
@@ -1967,20 +2004,26 @@ func (u *appUI) showSpotDialog() {
 
 	callEntry := widget.NewEntry()
 	callEntry.SetPlaceHolder("e.g. G1TLH")
+	callEntry.OnChanged = func(s string) {
+		up := strings.ToUpper(s)
+		if up != s {
+			callEntry.SetText(up)
+		}
+	}
 
 	commentEntry := widget.NewEntry()
-	commentEntry.SetPlaceHolder("optional, max 50 chars")
-
-	form := widget.NewForm(
-		widget.NewFormItem("Freq (kHz)", freqEntry),
-		widget.NewFormItem("Callsign", callEntry),
-		widget.NewFormItem("Comment", commentEntry),
-	)
-
-	dlg := dialog.NewCustomConfirm("Submit DX Spot", "Send", "Cancel", form, func(ok bool) {
-		if !ok {
-			return
+	commentEntry.SetPlaceHolder("e.g. DX USB")
+	// Pre-populate comment with "DX <MODE>" from flrig if available.
+	if u.flrig != nil {
+		if mode := u.flrig.GetLastMode(); mode != "" {
+			commentEntry.SetText("DX " + strings.ToUpper(mode))
 		}
+	}
+
+	// sendSpot is the shared submit action used by both the dialog confirm
+	// button and the Enter key on any of the three form fields.
+	var dlg *dialog.ConfirmDialog
+	sendSpot := func() {
 		freq := strings.TrimSpace(freqEntry.Text)
 		call := strings.ToUpper(strings.TrimSpace(callEntry.Text))
 		comment := strings.TrimSpace(commentEntry.Text)
@@ -1999,6 +2042,25 @@ func (u *appUI) showSpotDialog() {
 		}
 		u.term.append("> " + cmd + "\r\n")
 		_ = c.Send(cmd)
+		dlg.Hide()
+	}
+
+	// Wire Enter key on each field to submit the spot.
+	freqEntry.OnSubmitted = func(string) { sendSpot() }
+	callEntry.OnSubmitted = func(string) { sendSpot() }
+	commentEntry.OnSubmitted = func(string) { sendSpot() }
+
+	form := widget.NewForm(
+		widget.NewFormItem("Freq (kHz)", freqEntry),
+		widget.NewFormItem("Callsign", callEntry),
+		widget.NewFormItem("Comment", commentEntry),
+	)
+
+	dlg = dialog.NewCustomConfirm("Submit DX Spot", "Send", "Cancel", form, func(ok bool) {
+		if !ok {
+			return
+		}
+		sendSpot()
 	}, u.win)
 	dlg.Resize(fyne.NewSize(400, 220))
 	dlg.Show()
@@ -2234,11 +2296,24 @@ func newTerminalView() *terminalView {
 			tv.dirty = false
 			tv.mu.Unlock()
 			fyne.Do(func() {
+				// Capture scroll position BEFORE updating content so we can
+				// decide whether the user was at the bottom before new lines arrived.
+				oldContentH := tw.MinSize().Height
+				visibleH := tv.scroll.Size().Height
+				oldMaxOffset := oldContentH - visibleH
+				atBottom := oldMaxOffset <= 0 ||
+					oldMaxOffset-tv.scroll.Offset.Y <= tw.rowHeight*2
+
 				tw.mu.Lock()
 				tw.lines = snapshot
 				tw.mu.Unlock()
 				tw.Refresh()
-				tv.scroll.ScrollToBottom()
+
+				// Only auto-scroll if the user was at (or near) the bottom
+				// before the new content arrived.
+				if atBottom {
+					tv.scroll.ScrollToBottom()
+				}
 			})
 		}
 	}()

@@ -22,7 +22,8 @@
   // ── DOM references (populated in init) ────────────────────────────────────
 
   let modal, overlay, output, input, sendBtn, connectBtn, disconnectBtn,
-      callsignInput, spotpassInput, loginRow, inputRow, statusEl, closeBtn, termOpenBtn;
+      callsignInput, spotpassInput, loginRow, inputRow, statusEl, closeBtn, termOpenBtn,
+      spotBtn, spotOverlay, spotFreqInput, spotCallInput, spotCommentInput, spotSendBtn;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@
     if (loginRow)      loginRow.style.display      = state ? 'none'  : 'flex';
     if (connectBtn)    connectBtn.disabled          = state;
     if (disconnectBtn) disconnectBtn.style.display  = state ? ''      : 'none';
+    if (spotBtn)       spotBtn.disabled             = !state;
     // Toggle the header button's active (green) state
     if (termOpenBtn) termOpenBtn.classList.toggle('active', state);
     if (input && state) input.focus();
@@ -142,6 +144,7 @@
   }
 
   function disconnect() {
+    closeSpotModal();
     if (ws) {
       ws.send('bye\r\n');
       ws.close(1000, 'user disconnect');
@@ -150,6 +153,42 @@
     setConnected(false);
     setStatus('Disconnected', '');
   }
+
+  // ── Spot modal ─────────────────────────────────────────────────────────────
+
+  function openSpotModal() {
+    if (!spotOverlay || !connected) return;
+    if (spotFreqInput)    spotFreqInput.value    = '';
+    if (spotCallInput)    spotCallInput.value    = '';
+    if (spotCommentInput) spotCommentInput.value = '';
+    spotOverlay.style.display = 'flex';
+    if (spotFreqInput) spotFreqInput.focus();
+  }
+
+  function closeSpotModal() {
+    if (spotOverlay) spotOverlay.style.display = 'none';
+  }
+
+  function sendSpot() {
+    if (!ws || !connected) return;
+    const freq    = (spotFreqInput    ? spotFreqInput.value.trim()    : '');
+    const call    = (spotCallInput    ? spotCallInput.value.trim().toUpperCase() : '');
+    const comment = (spotCommentInput ? spotCommentInput.value.trim() : '');
+    if (!freq || !call) {
+      if (spotFreqInput && !freq) { spotFreqInput.focus(); }
+      else if (spotCallInput)     { spotCallInput.focus(); }
+      return;
+    }
+    let cmd = 'DX ' + freq + ' ' + call;
+    if (comment) cmd += ' ' + comment;
+    appendOutput('> ' + cmd + '\n');
+    ws.send(cmd + '\r\n');
+    closeSpotModal();
+    if (input) input.focus();
+  }
+
+  // Expose so the inline onclick in index.html can call it
+  window.closeSpotModal = closeSpotModal;
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
@@ -205,20 +244,26 @@
   // ── Init ───────────────────────────────────────────────────────────────────
 
   function init() {
-    modal         = document.getElementById('term-modal');
-    overlay       = document.getElementById('term-overlay');
-    output        = document.getElementById('term-output');
-    input         = document.getElementById('term-input');
-    sendBtn       = document.getElementById('term-send');
-    connectBtn    = document.getElementById('term-connect');
-    disconnectBtn = document.getElementById('term-disconnect');
-    callsignInput = document.getElementById('term-callsign');
-    spotpassInput = document.getElementById('term-spotpass');
-    loginRow      = document.getElementById('term-login-row');
-    inputRow      = document.getElementById('term-input-row');
-    statusEl      = document.getElementById('term-status');
-    closeBtn      = document.getElementById('term-close');
-    termOpenBtn   = document.getElementById('term-open-btn');
+    modal            = document.getElementById('term-modal');
+    overlay          = document.getElementById('term-overlay');
+    output           = document.getElementById('term-output');
+    input            = document.getElementById('term-input');
+    sendBtn          = document.getElementById('term-send');
+    connectBtn       = document.getElementById('term-connect');
+    disconnectBtn    = document.getElementById('term-disconnect');
+    callsignInput    = document.getElementById('term-callsign');
+    spotpassInput    = document.getElementById('term-spotpass');
+    loginRow         = document.getElementById('term-login-row');
+    inputRow         = document.getElementById('term-input-row');
+    statusEl         = document.getElementById('term-status');
+    closeBtn         = document.getElementById('term-close');
+    termOpenBtn      = document.getElementById('term-open-btn');
+    spotBtn          = document.getElementById('term-spot-btn');
+    spotOverlay      = document.getElementById('term-spot-overlay');
+    spotFreqInput    = document.getElementById('spot-freq');
+    spotCallInput    = document.getElementById('spot-call');
+    spotCommentInput = document.getElementById('spot-comment');
+    spotSendBtn      = document.getElementById('term-spot-send');
 
     if (!modal) return; // terminal HTML not present
 
@@ -245,6 +290,38 @@
     if (spotpassInput) {
       spotpassInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') connect();
+      });
+    }
+
+    // Spot button
+    if (spotBtn) spotBtn.addEventListener('click', openSpotModal);
+    if (spotSendBtn) spotSendBtn.addEventListener('click', sendSpot);
+
+    // Auto-uppercase the callsign field as the user types
+    if (spotCallInput) {
+      spotCallInput.addEventListener('input', function () {
+        var pos = spotCallInput.selectionStart;
+        var up  = spotCallInput.value.toUpperCase();
+        if (up !== spotCallInput.value) {
+          spotCallInput.value = up;
+          spotCallInput.setSelectionRange(pos, pos);
+        }
+      });
+    }
+
+    // Spot modal field keyboard handling
+    [spotFreqInput, spotCallInput, spotCommentInput].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter')  sendSpot();
+        if (e.key === 'Escape') closeSpotModal();
+      });
+    });
+
+    // Close spot overlay on backdrop click
+    if (spotOverlay) {
+      spotOverlay.addEventListener('click', function (e) {
+        if (e.target === spotOverlay) closeSpotModal();
       });
     }
 
