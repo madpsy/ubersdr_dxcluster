@@ -66,21 +66,20 @@
   </div>
 
   <div class="conn-pill disconnected" id="conn-decoder">
-    <div class="conn-dot"></div>
     <span>Digital</span>
   </div>
   <div class="conn-pill disconnected" id="conn-cw">
-    <div class="conn-dot"></div>
     <span>CW</span>
   </div>
   <div class="conn-pill disconnected" id="conn-voice">
-    <div class="conn-dot"></div>
     <span>Voice</span>
   </div>
   <div class="conn-pill disconnected" id="conn-dx">
-    <div class="conn-dot"></div>
     <span>DX</span>
   </div>
+  <a class="conn-pill hdr-download" href="{{.BasePath}}/client/download"
+     onclick="showClientInfo()"
+     title="Download the desktop DX Cluster client for your operating system">⬇️ Client</a>
 
   <div class="hdr-spacer"></div>
 
@@ -348,15 +347,6 @@
     </div>
   </div>
 
-</div>
-
-<!-- Centered desktop client download (auto-detects the visitor's OS) -->
-<div class="download-footer">
-  <a class="download-client-btn" href="{{.BasePath}}/client/download"
-     onclick="showClientInfo()"
-     title="Download the desktop DX Cluster client for your operating system">
-    ⬇️ Download Client
-  </a>
 </div>
 
 <!-- ── Web Terminal Modal ──────────────────────────────────────────────── -->
