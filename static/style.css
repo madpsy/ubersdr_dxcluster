@@ -123,6 +123,7 @@ header {
   display: flex; align-items: center; gap: 10px;
   font-size: 16px; font-weight: 700;
   letter-spacing: 0.03em; white-space: nowrap;
+  margin-right: auto;
 }
 .logo-icon { font-size: 22px; }
 .logo span { color: var(--blue); }
@@ -156,8 +157,6 @@ header {
 }
 .rx-call { color: var(--blue); font-weight: 700; font-family: var(--mono); }
 .rx-loc  { color: var(--muted); }
-
-.hdr-spacer { flex: 1; }
 
 .stat-pill {
   display: flex; align-items: center; gap: 6px;
