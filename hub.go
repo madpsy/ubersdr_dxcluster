@@ -1,8 +1,19 @@
 package main
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 const ringSize = 500 // max spots kept in the in-memory history ring (web UI initial load)
+
+// dedupKey identifies a spot for deduplication purposes.
+// Stream type is intentionally excluded so that a locally-submitted spot and
+// its echo arriving back via the upstream DX cluster stream share the same key.
+type dedupKey struct {
+	callsign string
+	freqHz   float64
+}
 
 // Hub fans out incoming Spots to all registered subscribers.
 // A single goroutine owns the subscriber map — no mutex needed for the map itself.
@@ -17,6 +28,10 @@ type Hub struct {
 	ring []Spot // circular history, newest-first
 
 	store *SpotStore // optional; nil if persistence is disabled
+
+	// dedup suppresses identical (callsign, freq) spots within a short window.
+	// Owned exclusively by Run() — no mutex required.
+	dedup map[dedupKey]time.Time
 }
 
 type subReq struct {
@@ -30,6 +45,7 @@ func NewHub(store *SpotStore) *Hub {
 		unsub: make(chan chan Spot, 16),
 		ring:  make([]Spot, 0, ringSize),
 		store: store,
+		dedup: make(map[dedupKey]time.Time),
 	}
 }
 
@@ -76,6 +92,23 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case s := <-h.in:
+			// Dedup: drop spots with the same callsign+freq seen within 5 seconds.
+			// Stream type is excluded from the key so that a locally-submitted spot
+			// and its echo arriving back via the upstream DX cluster share one key.
+			now := time.Now()
+			key := dedupKey{callsign: s.Callsign, freqHz: s.FreqHz}
+			if exp, seen := h.dedup[key]; seen && now.Before(exp) {
+				continue // duplicate within window — drop silently
+			}
+			h.dedup[key] = now.Add(5 * time.Second)
+
+			// Purge expired dedup entries to keep the map from growing unboundedly.
+			for k, exp := range h.dedup {
+				if now.After(exp) {
+					delete(h.dedup, k)
+				}
+			}
+
 			// Append to ring buffer
 			h.mu.Lock()
 			h.ring = append([]Spot{s}, h.ring...)
