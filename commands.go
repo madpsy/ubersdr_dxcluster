@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -431,6 +434,7 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 	}
 
 	t.hub.Publish(spot)
+	go t.injectSpot(spot)
 
 	log.Printf("[spot] %s submitted: %.1f kHz %s %q", state.Name, freqKHz, dxCall, comment)
 
@@ -438,6 +442,44 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 	// (including the submitting client) via the normal spot-stream path.
 	// StreamLocalSpot bypasses WantDXCluster so every client receives it.
 	return ""
+}
+
+// injectSpot forwards a locally-submitted spot to UberSDR's injection endpoint.
+// It is called as a goroutine so it never blocks the telnet response path.
+// A 2-second timeout bounds the full round-trip; all outcomes are logged.
+func (t *TelnetServer) injectSpot(spot Spot) {
+	url := strings.TrimRight(t.ubersdrURL, "/") + "/api/dxcluster/inject"
+
+	body := map[string]interface{}{
+		"spotter":   spot.Spotter,
+		"frequency": spot.FreqHz,
+		"dx_call":   spot.Callsign,
+		"comment":   spot.Comment,
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("[spot] inject: marshal error: %v", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(b))
+	if err != nil {
+		log.Printf("[spot] inject: request failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		log.Printf("[spot] inject: ok — %s %.1f kHz %s", spot.Spotter, spot.FreqHz/1000.0, spot.Callsign)
+	case http.StatusForbidden:
+		log.Printf("[spot] inject: 403 Forbidden — check inject_trusted_hosts in UberSDR config")
+	case http.StatusBadRequest:
+		log.Printf("[spot] inject: 400 Bad Request — malformed payload")
+	default:
+		log.Printf("[spot] inject: unexpected status %d", resp.StatusCode)
+	}
 }
 
 // parseSlotArgs extracts an optional leading slot number (0-9) from args,
