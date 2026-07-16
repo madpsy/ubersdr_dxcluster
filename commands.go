@@ -418,19 +418,34 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 	// ── 5. Comment sanitisation ────────────────────────────────────────────
 	comment := sanitiseSpotComment(strings.Join(commentArgs, " "))
 
+	// ── 5.5. CTY lookup for country enrichment ─────────────────────────────
+	var country, countryCode, continent string
+	if t.ubersdrURL != "" {
+		if r, err := lookupCTY(t.ubersdrURL, dxCall); err != nil {
+			log.Printf("[spot] cty lookup for %s: %v (country will be empty)", dxCall, err)
+		} else if r != nil {
+			country = r.Country
+			countryCode = r.CountryCode
+			continent = r.Continent
+		}
+	}
+
 	// ── 6. Build and publish the spot ──────────────────────────────────────
 	freqHz := freqKHz * 1000.0
 	spot := Spot{
 		// StreamLocalSpot bypasses the WantDXCluster gate in ShouldSend so
 		// the spot is delivered to ALL connected clients, not just those that
 		// have opted in to the upstream DX cluster feed.
-		Stream:    StreamLocalSpot,
-		Timestamp: time.Now().UTC(),
-		FreqHz:    freqHz,
-		Band:      bandForSpot(freqHz),
-		Callsign:  dxCall,
-		Spotter:   state.Name,
-		Comment:   comment,
+		Stream:      StreamLocalSpot,
+		Timestamp:   time.Now().UTC(),
+		FreqHz:      freqHz,
+		Band:        bandForSpot(freqHz),
+		Callsign:    dxCall,
+		Spotter:     state.Name,
+		Comment:     comment,
+		Country:     country,
+		CountryCode: countryCode,
+		Continent:   continent,
 	}
 
 	t.hub.Publish(spot)
