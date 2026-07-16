@@ -290,7 +290,7 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 
 	// ── Banner ─────────────────────────────────────────────────────────────
 	fmt.Fprintf(conn, "Hello de %s DX Cluster\r\n", t.spotterCall)
-	fmt.Fprintf(conn, "Streaming live spots from UberSDR (Digital / CW / Voice / DX Cluster)\r\n")
+	fmt.Fprintf(conn, "Streaming live CW and Voice spots from UberSDR.\r\n")
 	fmt.Fprintf(conn, "Type HELP for a full list of commands, or BYE to disconnect.\r\n")
 	fmt.Fprintf(conn, "Digital decoder and upstream DX cluster spots are disabled by default.\r\n")
 	fmt.Fprintf(conn, "To enable: SET/DIGITAL and/or SET/DXCLUSTER\r\n")

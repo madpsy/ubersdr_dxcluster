@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -74,9 +75,19 @@ type qrzErrorResult struct {
 //   - nil, nil             when the callsign is not found (404)
 //   - nil, error           on network error, service disabled, or other failure
 func lookupQRZ(baseURL, callsign string) (*qrzLookupResult, error) {
+	return lookupQRZCtx(context.Background(), baseURL, callsign)
+}
+
+// lookupQRZCtx is the context-aware variant of lookupQRZ.
+// Use this when a deadline is needed (e.g. spot submission path).
+func lookupQRZCtx(ctx context.Context, baseURL, callsign string) (*qrzLookupResult, error) {
 	endpoint := strings.TrimRight(baseURL, "/") + "/api/lookup?callsign=" + url.QueryEscape(callsign)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("lookup request failed: %w", err)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(endpoint)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("lookup request failed: %w", err)
 	}
