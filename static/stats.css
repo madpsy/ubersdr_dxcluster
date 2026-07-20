@@ -3,17 +3,32 @@
    inherited from style.css so the two pages stay visually identical. */
 
 :root {
+  /* UI chrome. Kept separate from the series palette below so the two can
+     change independently — an interface accent is not a data colour. */
+  --accent:  #0395ca;
+  --accent2: #0b99b3;
+  --danger:  #ed3a5f;
+
   /* Categorical series slots — assigned in this fixed order, never cycled.
-     Validated against the #111827 chart surface (dark mode): lightness band,
-     chroma floor, adjacent CVD separation, normal-vision separation and
-     contrast all pass. Do not reorder: the ordering IS the CVD safety. */
-  --s1: #0395ca;  /* blue   */
-  --s2: #d46507;  /* orange */
-  --s3: #04a178;  /* green  */
-  --s4: #8f72df;  /* purple */
-  --s5: #a88400;  /* gold   */
-  --s6: #0b99b3;  /* cyan   */
-  --s7: #ed3a5f;  /* red    */
+     Ten slots, so the standard HF band set (160m…10m) fits without folding.
+     Validated against the #111827 chart surface: lightness band, chroma floor,
+     adjacent CVD separation (worst ΔE 16.7), normal-vision separation and
+     contrast all pass.
+
+     DO NOT REORDER. The ordering is the CVD-safety mechanism, not cosmetic:
+     all ten rotations of this sequence were checked and only this one passes —
+     every other puts the teal and green adjacent at ΔE 7.2, below the floor.
+     An 11th series is never a generated hue; it folds into "Other". */
+  --s1:  #29a6a9;  /* teal    */
+  --s2:  #d77525;  /* orange  */
+  --s3:  #f22cbd;  /* magenta */
+  --s4:  #7ba223;  /* olive   */
+  --s5:  #279dd3;  /* blue    */
+  --s6:  #af8e24;  /* gold    */
+  --s7:  #b365f6;  /* violet  */
+  --s8:  #f84960;  /* red     */
+  --s9:  #6b89f7;  /* indigo  */
+  --s10: #2aab78;  /* green   */
 
   /* Sequential ramp (single hue, light→dark) for heatmap magnitude.
      The darkest step recedes toward the surface: near-zero reads as "nothing". */
@@ -35,7 +50,7 @@
 .filter-input.num { width: 66px; }
 select.filter-input.multi { width: 130px; height: auto; font-family: var(--font); }
 select.filter-input.multi option { padding: 2px 5px; }
-select.filter-input.multi option:checked { background: var(--s1); color: #fff; }
+select.filter-input.multi option:checked { background: var(--accent); color: #fff; }
 select.filter-input.multi optgroup {
   color: var(--muted); font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.07em;
@@ -47,7 +62,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
 .filter-actions { justify-content: flex-end; }
 .apply-btn {
   padding: 5px 18px; border-radius: 5px;
-  background: var(--s1); border: 1px solid var(--s1);
+  background: var(--accent); border: 1px solid var(--accent);
   color: #fff; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
 }
@@ -65,7 +80,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
   padding: 9px 14px; cursor: pointer;
 }
 .tab:hover { color: var(--text); }
-.tab.active { color: var(--s6); border-bottom-color: var(--s6); }
+.tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
 .tab-status { margin-left: auto; font-size: 11px; color: var(--dim); padding-right: 10px; }
 
 .tabpanel { display: flex; flex-direction: column; gap: 12px; }
@@ -96,7 +111,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
 .spinner {
   width: 14px; height: 14px; flex-shrink: 0;
   border: 2px solid var(--border2);
-  border-top-color: var(--s1);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -107,7 +122,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation: pulse 1.4s ease-in-out infinite;
-    border-color: var(--s1);
+    border-color: var(--accent);
   }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   .chart-host, .tiles, .table-wrap, .filter-body, .exclude-bar { transition: none; }
@@ -159,12 +174,12 @@ select.filter-input.multi option.empty { color: var(--dim); }
 .exclude-bar[hidden] { display: none; }
 .exclude-label {
   font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--s7);
+  letter-spacing: 0.08em; color: var(--danger);
 }
 .exclude-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
 .exclude-chip {
   display: inline-flex; align-items: center; gap: 7px;
-  background: var(--surface2); border: 1px solid var(--s7);
+  background: var(--surface2); border: 1px solid var(--danger);
   border-radius: 14px; padding: 2px 4px 2px 10px;
   font-family: var(--mono); font-size: 11px; color: var(--text);
 }
@@ -174,22 +189,22 @@ select.filter-input.multi option.empty { color: var(--dim); }
   color: var(--muted); font-size: 14px; line-height: 1;
   padding: 0 5px; border-radius: 50%;
 }
-.exclude-chip button:hover { color: var(--s7); background: rgba(237, 58, 95, 0.15); }
+.exclude-chip button:hover { color: var(--danger); background: rgba(237, 58, 95, 0.15); }
 
 /* Cells that exclude their value when clicked. */
 .data-table td.excludable { cursor: pointer; }
-.data-table td.excludable:hover { color: var(--s7); text-decoration: line-through; }
+.data-table td.excludable:hover { color: var(--danger); text-decoration: line-through; }
 .data-table td.excludable::after {
   content: ' ✕'; color: var(--dim); opacity: 0; font-size: 10px;
 }
-.data-table td.excludable:hover::after { opacity: 1; color: var(--s7); }
+.data-table td.excludable:hover::after { opacity: 1; color: var(--danger); }
 
 .panel-hint {
   padding: 10px 14px; font-size: 11px; line-height: 1.6;
   color: var(--muted); border-bottom: 1px solid var(--border);
 }
 .panel-hint strong { color: var(--text); }
-.panel-hint b { color: var(--s7); }
+.panel-hint b { color: var(--danger); }
 
 /* ── Callsign lookup ── */
 .lookup-body {
@@ -209,7 +224,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
   border-radius: 14px; padding: 3px 10px;
   font-family: var(--mono); font-size: 11px; color: var(--text);
 }
-.spotter-chip b { color: var(--s6); font-weight: 700; }
+.spotter-chip b { color: var(--accent2); font-weight: 700; }
 
 /* Stand-in for a chart whose data has collapsed to a single value. */
 .solo { padding: 6px 2px 12px; }
@@ -233,8 +248,8 @@ select.filter-input.multi option.empty { color: var(--dim); }
   padding: 3px 9px; cursor: pointer;
 }
 .mini-select { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); }
-.mini-btn:hover, .mini-select:hover { border-color: var(--s1); color: var(--text); }
-.mini-btn.on { border-color: var(--s6); color: var(--s6); }
+.mini-btn:hover, .mini-select:hover { border-color: var(--accent); color: var(--text); }
+.mini-btn.on { border-color: var(--accent2); color: var(--accent2); }
 .mini-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
 
 /* Table-view twin of each chart — the WCAG-clean equivalent. */

@@ -15,7 +15,8 @@ const api = (path, qs) => `${BASE}/api/stats/${path}?${qs}`;
  * Colour follows the entity, never its rank: a name keeps its slot across
  * filter changes, so filtering a series out never repaints the survivors.
  */
-const SERIES = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7'];
+const SERIES = ['--s1', '--s2', '--s3', '--s4', '--s5',
+                '--s6', '--s7', '--s8', '--s9', '--s10'];
 const RAMP = ['--q0', '--q1', '--q2', '--q3', '--q4', '--q5', '--q6', '--q7'];
 const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
@@ -347,7 +348,7 @@ function renderHBars(host, opts) {
     hit.addEventListener('mousemove', (e) => showTip(e,
       `<b>${escapeHTML(keyLabel(dim, r.key))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
       (r.n !== undefined ? `<div>from ${fmtInt(r.n)} spots</div>` : '') +
-      (opts.onPick ? '<div style="color:var(--s7)">click to exclude</div>' : '')));
+      (opts.onPick ? '<div style="color:var(--danger)">click to exclude</div>' : '')));
     hit.addEventListener('mouseleave', hideTip);
     if (opts.onPick) {
       hit.style.cursor = 'pointer';
@@ -691,7 +692,7 @@ async function renderOverview() {
 
   const [sum, ser, streams, countries, bands, modes, calls] = await Promise.all([
     get('summary'),
-    get('series', { bucket, metric: 'count', split_by: split, max_series: 7 }),  // + folded "Other"
+    get('series', { bucket, metric: 'count', split_by: split, max_series: 10 }),  // 11th+ folds to "Other"
     get('breakdown', { group_by: 'stream', sort: 'count', limit: 10 }),
     get('breakdown', { group_by: 'country', sort: 'count', limit: 12 }),
     get('breakdown', { group_by: 'band', sort: 'count', limit: 14 }),
