@@ -292,7 +292,9 @@
       <div class="chart-host" id="rk-chart"></div>
     </div>
     <div class="card card-full">
-      <div class="card-hdr"><span class="icon">📋</span> Full metrics</div>
+      <div class="card-hdr"><span class="icon">📋</span> Full metrics
+        <div class="hdr-right"><button class="mini-btn" data-csv="rk-table">⬇ CSV</button></div>
+      </div>
       <div class="table-wrap" id="rk-table"></div>
     </div>
   </section>
@@ -324,7 +326,9 @@
     </div>
 
     <div class="card card-full">
-      <div class="card-hdr"><span class="icon">📋</span> Spotter activity</div>
+      <div class="card-hdr"><span class="icon">📋</span> Spotter activity
+        <div class="hdr-right"><button class="mini-btn" data-csv="sr-table">⬇ CSV</button></div>
+      </div>
       <p class="panel-hint">
         DX cluster, locally submitted and CW skimmer spots carry a spotter callsign;
         this receiver's own digital and voice decoders do not.
@@ -339,6 +343,7 @@
       <div class="card-hdr">
         <span class="icon">🔎</span> Who spotted a callsign
         <span class="filter-note">Exact callsign match, within the filtered period</span>
+        <div class="hdr-right"><button class="mini-btn" data-csv="lk-table">⬇ CSV</button></div>
       </div>
       <div class="lookup-body">
         <input class="filter-input lookup-input" id="lk-call" placeholder="e.g. DL1ABC"
@@ -379,7 +384,7 @@
           <span class="badge" id="sp-count">—</span>
           <button class="mini-btn" id="sp-prev">‹ Prev</button>
           <button class="mini-btn" id="sp-next">Next ›</button>
-          <button class="mini-btn" id="sp-csv">Download CSV</button>
+          <button class="mini-btn" data-csv="sp-table">⬇ CSV</button>
         </div>
       </div>
       <div class="table-wrap" id="sp-table"></div>

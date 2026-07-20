@@ -239,6 +239,7 @@ select.filter-input.multi option.empty { color: var(--dim); }
 
 /* Table-view twin of each chart — the WCAG-clean equivalent. */
 .chart-table { padding: 4px 0 8px; overflow-x: auto; }
+.twin-bar { display: flex; justify-content: flex-end; padding: 0 2px 6px; }
 .chart-table table { min-width: 0; }
 .chart-table td.num, .data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .data-table td, .data-table th { padding: 5px 10px; }

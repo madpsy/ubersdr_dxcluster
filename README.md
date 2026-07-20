@@ -239,8 +239,12 @@ pickers are the opposite case and are driven purely by what the database holds.
   mode, …).
 - **Spots** — the raw rows behind any aggregate, paged, with CSV download.
 
-Every chart has a **Table** button showing the same numbers as text, and all
-times are UTC. While a query is running the previous charts are held at reduced
+Every chart has a **Table** button showing the same numbers as text, and every
+table — chart table-views included — has a **⬇ CSV** button. Exports carry the
+underlying values rather than the displayed ones (no thousands separators, empty
+cells instead of em dashes), use CRLF line endings and a UTF-8 BOM so Excel reads
+accented country names correctly, and are named after the dataset and the active
+time window. All times are UTC. While a query is running the previous charts are held at reduced
 opacity — never blanked, so nothing jumps when the new data lands — and a
 spinner names what is being fetched ("Loading best-time analysis…"). It appears
 only after ~120 ms, so quick queries don't flash, and it respects

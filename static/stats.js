@@ -447,18 +447,36 @@ function buildTable(cols, rows) {
   return t;
 }
 
-// tableTwins holds the table view for each chart host, toggled by its button.
+// tableTwins is the registry behind both the chart table-views and the
+// standalone tables. Everything registered here can be exported as CSV.
 const tableTwins = new Map();
-function setTableTwin(hostId, cols, rows) {
-  tableTwins.set(hostId, { cols, rows });
+
+function setTableTwin(hostId, cols, rows, name) {
+  tableTwins.set(hostId, { cols, rows, name: name || hostId });
   const host = document.getElementById(hostId);
   const existing = host.parentElement.querySelector(`.chart-table[data-for="${hostId}"]`);
   if (existing) renderTwin(hostId, existing);
 }
+
+// renderDataTable draws a standalone table and registers it for export.
+function renderDataTable(hostId, cols, rows, name) {
+  tableTwins.set(hostId, { cols, rows, name: name || hostId });
+  const wrap = document.getElementById(hostId);
+  wrap.innerHTML = '';
+  wrap.appendChild(buildTable(cols, rows));
+}
+
 function renderTwin(hostId, wrap) {
   const t = tableTwins.get(hostId);
   wrap.innerHTML = '';
-  if (t) wrap.appendChild(buildTable(t.cols, t.rows));
+  if (!t) return;
+  // The twin carries its own export button: the chart card's header holds the
+  // Table toggle, and the two belong together.
+  const bar = document.createElement('div');
+  bar.className = 'twin-bar';
+  bar.innerHTML = `<button class="mini-btn" data-csv="${hostId}">⬇ CSV</button>`;
+  wrap.appendChild(bar);
+  wrap.appendChild(buildTable(t.cols, t.rows));
 }
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-toggle-table]');
@@ -712,7 +730,7 @@ async function renderOverview() {
       row[n] = p ? p.v : null;
     }
     return row;
-  }));
+  }), `activity-by-${split || 'total'}`);
 
   hbarCard('ov-streams', streams.rows, 'stream', 'Spots');
   hbarCard('ov-countries', countries.rows, 'country', 'Spots');
@@ -729,7 +747,7 @@ function tile(label, value, sub) {
 
 function hbarCard(hostId, rows, dim, metricLabel) {
   const host = $(hostId);
-  setTableTwin(hostId, breakdownCols(dim), rows);
+  setTableTwin(hostId, breakdownCols(dim), rows, `by-${dim}`);
 
   // A one-bar bar chart is just a number wearing a rectangle — which is what
   // happens whenever the filter pins this dimension to a single value. Show
@@ -761,7 +779,7 @@ async function renderBestTime() {
     rows: hours.map(r => ({ key: r.key, v: r.count, n: r.count })),
     dim: 'hour', metricLabel: 'Spots',
   });
-  setTableTwin('bt-hours', breakdownCols('hour'), hours);
+  setTableTwin('bt-hours', breakdownCols('hour'), hours, 'spots-by-utc-hour');
 
   // Average SNR gets its own plot on its own axis — never a second y-scale.
   const snrPts = hours.filter(r => r.avg_snr !== null).map(r => ({ label: fmtHour(r.key), v: r.avg_snr }));
@@ -775,7 +793,7 @@ async function renderBestTime() {
     { label: 'Average SNR (dB)', num: true, get: r => fmtNum(r.avg_snr) },
     { label: 'Peak SNR (dB)', num: true, get: r => fmtNum(r.max_snr) },
     { label: 'Spots', num: true, get: r => fmtInt(r.count) },
-  ], hours);
+  ], hours, 'avg-snr-by-utc-hour');
 
   const metricLabel = $('bt-metric').selectedOptions[0].textContent;
   renderHeatmap($('bt-heat'), {
@@ -787,7 +805,7 @@ async function renderBestTime() {
     { label: 'UTC hour', get: c => fmtHour(c.x) },
     { label: metricLabel, num: true, get: c => fmtNum(c.v) },
     { label: 'Spots', num: true, get: c => fmtInt(c.n) },
-  ], heat.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)));
+  ], heat.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)), 'hour-by-band');
 
   renderAnswer(byHour, heat);
 }
@@ -845,9 +863,7 @@ async function renderRankings() {
   renderHBars($('rk-chart'), {
     rows: res.rows.map(r => ({ key: r.key, v: pick(r), n: r.count })), dim, metricLabel,
   });
-  const wrap = $('rk-table');
-  wrap.innerHTML = '';
-  wrap.appendChild(buildTable(breakdownCols(dim), res.rows));
+  renderDataTable('rk-table', breakdownCols(dim), res.rows, `ranking-by-${dim}`);
 }
 
 function breakdownCols(dim) {
@@ -911,11 +927,8 @@ async function renderSpotters() {
     dim: 'spotter', metricLabel,
     onPick: (key) => exclude('spotter', key),
   });
-  setTableTwin('sr-chart', spotterCols(), rank.rows);
-
-  const wrap = $('sr-table');
-  wrap.innerHTML = '';
-  wrap.appendChild(buildTable(spotterCols(), rank.rows));
+  setTableTwin('sr-chart', spotterCols(), rank.rows, 'spotters');
+  renderDataTable('sr-table', spotterCols(), rank.rows, 'spotter-activity');
 }
 
 function spotterCols() {
@@ -987,8 +1000,7 @@ async function lookupCallsign() {
       `<span class="spotter-chip">${escapeHTML(r.key)} <b>${fmtInt(r.count)}</b></span>`).join('') + '</div>' : '') +
     `</div>`;
 
-  table.innerHTML = '';
-  table.appendChild(buildTable([
+  renderDataTable('lk-table', [
     { label: 'Time (UTC)', get: s => s.timestamp.replace('T', ' ').slice(0, 19) },
     { label: 'Spotter', key: true, get: s => s.spotter || '— (own decoder)' },
     { label: 'Freq kHz', num: true, get: s => (s.freq_hz / 1000).toFixed(1) },
@@ -999,7 +1011,7 @@ async function lookupCallsign() {
     { label: 'km', num: true, get: s => s.distance_km ? fmtInt(s.distance_km) : '' },
     { label: 'Source', get: s => streamLabel(s.stream) },
     { label: 'Comment', get: s => s.comment || s.message || '' },
-  ], spots.spots));
+  ], spots.spots, `spots-of-${call}`);
 }
 
 /* ── Tab: Compare ──────────────────────────────────────────────────────── */
@@ -1016,7 +1028,7 @@ async function renderCompare() {
     { label: dimLabel(x), key: true, get: c => keyLabel(x, c.x) },
     { label: metricLabel, num: true, get: c => fmtNum(c.v) },
     { label: 'Spots', num: true, get: c => fmtInt(c.n) },
-  ], res.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)));
+  ], res.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)), `${y}-by-${x}`);
 }
 
 /* ── Tab: Spots ────────────────────────────────────────────────────────── */
@@ -1044,17 +1056,47 @@ async function renderSpots() {
     { label: 'Source', get: s => streamLabel(s.stream) },
     { label: 'Comment', get: s => s.comment || s.message || '' },
   ];
-  const wrap = $('sp-table');
-  wrap.innerHTML = '';
-  wrap.appendChild(buildTable(cols, res.spots));
-  wrap._csv = () => toCSV(cols, res.spots);
+  renderDataTable('sp-table', cols, res.spots, 'spots');
+}
+
+// csvValue exports the underlying value, not the display string: thousands
+// separators would import as text, and an em dash is not "no data" to a
+// spreadsheet. A column can override with its own `csv` accessor.
+function csvValue(col, row) {
+  if (col.csv) return col.csv(row);
+  const v = col.get(row);
+  if (v === null || v === undefined || v === '—') return '';
+  return col.num ? String(v).replace(/,/g, '') : v;
 }
 
 function toCSV(cols, rows) {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  return [cols.map(c => q(c.label)).join(','),
-    ...rows.map(r => cols.map(c => q(c.get(r))).join(','))].join('\n');
+  // CRLF per RFC 4180, and a BOM so Excel reads the UTF-8 in country names.
+  return '\ufeff' + [cols.map(c => q(c.label)).join(','),
+    ...rows.map(r => cols.map(c => q(csvValue(c, r))).join(','))].join('\r\n');
 }
+
+// csvFilename stamps the export with its dataset and the active time window,
+// so a folder of these stays tellable apart.
+function csvFilename(name) {
+  const win = ($('hdr-window').textContent || '').replace(/[^0-9-]+/g, '_').replace(/^_|_$/g, '');
+  return `dxcluster-${name}${win ? '-' + win : ''}.csv`;
+}
+
+function downloadCSV(hostId) {
+  const t = tableTwins.get(hostId);
+  if (!t || !t.rows || !t.rows.length) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([toCSV(t.cols, t.rows)], { type: 'text/csv;charset=utf-8' }));
+  a.download = csvFilename(t.name);
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-csv]');
+  if (btn) downloadCSV(btn.dataset.csv);
+});
 
 /* ── Tab wiring ────────────────────────────────────────────────────────── */
 const RENDERERS = {
@@ -1205,16 +1247,6 @@ async function init() {
 
   $('sp-prev').addEventListener('click', () => { spotOffset = Math.max(0, spotOffset - SPOT_PAGE); refresh(); });
   $('sp-next').addEventListener('click', () => { spotOffset += SPOT_PAGE; refresh(); });
-  $('sp-csv').addEventListener('click', () => {
-    const csv = $('sp-table')._csv && $('sp-table')._csv();
-    if (!csv) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'dxcluster-spots.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
-
   // Redraw on resize — the SVGs are sized from their container's pixel width.
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(refresh, 250); });
