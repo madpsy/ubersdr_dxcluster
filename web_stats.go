@@ -162,14 +162,16 @@ func (w *WebServer) handleStatsMatrix(rw http.ResponseWriter, r *http.Request) {
 	x := queryOr(r, "x", "hour")
 	y := queryOr(r, "y", "band")
 	metric := queryOr(r, "metric", "count")
-	cells, xKeys, yKeys, err := w.store.Matrix(f, x, y, metric, queryInt(r, "limit_y", 25))
+	cells, axes, err := w.store.Matrix(f, x, y, metric, queryInt(r, "limit_y", 25))
 	if err != nil {
 		statsError(rw, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"filter": f.Describe(), "x": x, "y": y, "metric": metric,
-		"x_keys": xKeys, "y_keys": yKeys, "cells": cells,
+		"x_keys": axes.XKeys, "y_keys": axes.YKeys,
+		"x_meta": axes.XMeta, "y_meta": axes.YMeta,
+		"cells": cells,
 	})
 }
 

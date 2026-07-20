@@ -142,9 +142,30 @@ function shiftHour(utcHour) {
 }
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// keyLabel renders a raw group key for the dimension it came from.
-function keyLabel(dim, key) {
+// countryFlag turns an ISO 3166-1 alpha-2 code into its flag emoji, by mapping
+// each letter to its regional-indicator codepoint. Same approach as the live
+// spot page; the Twemoji Flags webfont in fonts.css covers browsers whose
+// system emoji font has no flag glyphs.
+function countryFlag(code) {
+  if (!code || code.length !== 2 || !/^[a-z]{2}$/i.test(code)) return '';
+  const base = 0x1F1E6 - 65;
+  return String.fromCodePoint(code.toUpperCase().charCodeAt(0) + base) +
+         String.fromCodePoint(code.toUpperCase().charCodeAt(1) + base);
+}
+
+// withFlag prefixes a label with its country flag when there is a code for it.
+const withFlag = (code, label) => {
+  const f = countryFlag(code);
+  return f ? `${f} ${label}` : label;
+};
+
+// keyLabel renders a raw group key for the dimension it came from. `meta` is the
+// dimension's companion value from the API — the ISO code when grouping by
+// country name, which is what makes a flag possible.
+function keyLabel(dim, key, meta) {
   if (key === '' || key === null || key === undefined) return '—';
+  if (dim === 'country') return withFlag(meta, key);
+  if (dim === 'cc') return withFlag(key, meta || key);
   if (dim === 'stream') return streamLabel(key);
   if (dim === 'hour') return fmtHour(shiftHour(key));
   if (dim === 'weekday') return WEEKDAYS[+key] || key;
@@ -401,7 +422,7 @@ function renderVBars(host, opts) {
 
     if (i % every === 0) {
       el('text', { class: 'axis-text tabular', x: x + bw / 2, y: m.t + ih + 15, 'text-anchor': 'middle' }, svg)
-        .textContent = keyLabel(dim, r.key);
+        .textContent = keyLabel(dim, r.key, r.meta);
     }
     // Direct-label only the extreme — a number on every bar is unreadable.
     if (r === peak && r.v !== null) {
@@ -410,7 +431,7 @@ function renderVBars(host, opts) {
     // Hit area spans the full slot height so the target is never pinpoint.
     const hit = el('rect', { class: 'hit', x: m.l + i * slot, y: m.t, width: slot, height: ih }, svg);
     hit.addEventListener('mousemove', (e) => showTip(e,
-      `<b>${escapeHTML(keyLabel(dim, r.key))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
+      `<b>${escapeHTML(keyLabel(dim, r.key, r.meta))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
       (r.n !== undefined ? `<div>from ${fmtInt(r.n)} spots</div>` : '')));
     hit.addEventListener('mouseleave', hideTip);
   });
@@ -438,14 +459,14 @@ function renderHBars(host, opts) {
     const bh = rowH - 2; // 2px surface gap between adjacent bars
     const w = Math.max(1, ((r.v ?? 0) / hi) * iw);
     el('text', { class: 'axis-text', x: m.l - 8, y: y + bh / 2 + 3, 'text-anchor': 'end' }, svg)
-      .textContent = truncate(keyLabel(dim, r.key), 24);
+      .textContent = truncate(keyLabel(dim, r.key, r.meta), 24);
     el('path', { d: barPath(m.l, y, w, bh, 4, 'right'), fill: color }, svg);
     // Value sits outside the bar end, so it can never be clipped by a short bar.
     el('text', { class: 'axis-text tabular', x: m.l + w + 6, y: y + bh / 2 + 3 }, svg).textContent = fmtNum(r.v);
 
     const hit = el('rect', { class: 'hit', x: 0, y: y - 1, width: W, height: rowH }, svg);
     hit.addEventListener('mousemove', (e) => showTip(e,
-      `<b>${escapeHTML(keyLabel(dim, r.key))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
+      `<b>${escapeHTML(keyLabel(dim, r.key, r.meta))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
       (r.n !== undefined ? `<div>from ${fmtInt(r.n)} spots</div>` : '') +
       (opts.onPick ? '<div style="color:var(--danger)">click to exclude</div>' : '')));
     hit.addEventListener('mouseleave', hideTip);
@@ -459,6 +480,7 @@ function renderHBars(host, opts) {
 /* ── Chart: heatmap ────────────────────────────────────────────────────── */
 function renderHeatmap(host, opts) {
   const { cells, xKeys, yKeys, xDim, yDim, metricLabel } = opts;
+  const xMeta = opts.xMeta || {}, yMeta = opts.yMeta || {};
   host.innerHTML = '';
   if (!cells.length) return empty(host);
 
@@ -479,13 +501,13 @@ function renderHeatmap(host, opts) {
   xKeys.forEach((xk, i) => {
     if (i % everyX) return;
     el('text', { class: 'axis-text tabular', x: m.l + i * cw + cw / 2, y: H - 10, 'text-anchor': 'middle' }, svg)
-      .textContent = truncate(keyLabel(xDim, xk), 8);
+      .textContent = truncate(keyLabel(xDim, xk, xMeta[xk]), 8);
   });
 
   yKeys.forEach((yk, j) => {
     const y = m.t + j * ch;
     el('text', { class: 'axis-text', x: m.l - 8, y: y + ch / 2 + 3, 'text-anchor': 'end' }, svg)
-      .textContent = truncate(keyLabel(yDim, yk), 20);
+      .textContent = truncate(keyLabel(yDim, yk, yMeta[yk]), 20);
     xKeys.forEach((xk, i) => {
       const c = byXY.get(xk + ' ' + yk);
       const x = m.l + i * cw;
@@ -496,7 +518,7 @@ function renderHeatmap(host, opts) {
       }, svg);
       const hit = el('rect', { class: 'hit', x, y, width: cw, height: ch }, svg);
       hit.addEventListener('mousemove', (e) => showTip(e,
-        `<b>${escapeHTML(keyLabel(yDim, yk))} · ${escapeHTML(keyLabel(xDim, xk))}</b>` +
+        `<b>${escapeHTML(keyLabel(yDim, yk, yMeta[yk]))} · ${escapeHTML(keyLabel(xDim, xk, xMeta[xk]))}</b>` +
         `<div>${escapeHTML(metricLabel)}: <b>${c ? fmtNum(c.v) : '—'}</b></div>` +
         (c ? `<div>from ${fmtInt(c.n)} spots</div>` : '')));
       hit.addEventListener('mouseleave', hideTip);
@@ -867,12 +889,14 @@ function hbarCard(hostId, rows, dim, metricLabel) {
     host.innerHTML =
       `<div class="solo"><div class="solo-value">${escapeHTML(fmtInt(r.count))}</div>` +
       `<div class="solo-label">${escapeHTML(metricLabel.toLowerCase())} — ` +
-      `${escapeHTML(keyLabel(dim, r.key))}</div>` +
+      `${escapeHTML(keyLabel(dim, r.key, r.meta))}</div>` +
       `<div class="solo-sub">${escapeHTML(fmtInt(r.calls))} unique callsigns` +
       (r.avg_snr === null ? '' : ` · ${escapeHTML(fmtNum(r.avg_snr))} dB average`) + `</div></div>`;
     return;
   }
-  renderHBars(host, { rows: rows.map(r => ({ key: r.key, v: r.count, n: r.count })), dim, metricLabel });
+  renderHBars(host, {
+    rows: rows.map(r => ({ key: r.key, meta: r.meta, v: r.count, n: r.count })), dim, metricLabel,
+  });
 }
 
 /* ── Tab: Best Time ────────────────────────────────────────────────────── */
@@ -954,7 +978,7 @@ function describeScope() {
   if (bands.length) bits.push('on ' + bands.join('/'));
   if (modes.length) bits.push('in ' + modes.join('/'));
   const ccSel = $('f-country').selectedOptions[0];
-  if (ccSel && ccSel.value) bits.push('for ' + ccSel.textContent.replace(/\s*\(\d+\)$/, ''));
+  if (ccSel && ccSel.value) bits.push('for ' + ccSel.textContent.replace(/\s*\([\d,]+\)$/, '').trim());
   const conts = multiVals('f-continent');
   if (conts.length && !ccSel?.value) bits.push('in ' + conts.join('/'));
   return bits.length ? bits.join(' ') : 'across all spots';
@@ -973,14 +997,14 @@ async function renderRankings() {
   }[metric] || (r => r.count);
 
   renderHBars($('rk-chart'), {
-    rows: res.rows.map(r => ({ key: r.key, v: pick(r), n: r.count })), dim, metricLabel,
+    rows: res.rows.map(r => ({ key: r.key, meta: r.meta, v: pick(r), n: r.count })), dim, metricLabel,
   });
   renderDataTable('rk-table', breakdownCols(dim), res.rows, `ranking-by-${dim}`);
 }
 
 function breakdownCols(dim) {
   return [
-    { label: dimLabel(dim), key: true, get: r => keyLabel(dim, r.key) },
+    { label: dimLabel(dim), key: true, get: r => keyLabel(dim, r.key, r.meta) },
     { label: 'Spots', num: true, get: r => fmtInt(r.count) },
     { label: 'Callsigns', num: true, get: r => fmtInt(r.calls) },
     // A country count is always 1 when the rows *are* countries — drop it.
@@ -1091,6 +1115,7 @@ async function lookupCallsign() {
   const submitted = bySpotter.rows.reduce((a, r) => a + r.count, 0);
   const ownDecoder = sum.summary.spots - submitted;
   const bands = byBand.rows.map(r => r.key);
+  const home = spots.spots.find(sp => sp.country_code);
   const n = bySpotter.rows.length;
 
   const credit = n
@@ -1100,7 +1125,9 @@ async function lookupCallsign() {
     ? `, <strong>${fmtInt(ownDecoder)}</strong> heard directly by this receiver` : '';
 
   summary.innerHTML =
-    `<div class="lookup-result"><div class="lookup-hero">${escapeHTML(call)}</div>` +
+    `<div class="lookup-result"><div class="lookup-hero">` +
+    (home ? escapeHTML(countryFlag(home.country_code)) + ' ' : '') +
+    `${escapeHTML(call)}</div>` +
     `<div class="lookup-sub">Spotted <strong>${fmtInt(sum.summary.spots)} times</strong>` +
     (bands.length ? ` on ${escapeHTML(bands.join(', '))}` : '') + ` — ${credit}${own}. ` +
     `Last heard <strong>${escapeHTML(fmtTS(sum.summary.last_ts))}</strong>, ` +
@@ -1134,10 +1161,11 @@ async function renderCompare() {
   const metricLabel = $('cm-metric').selectedOptions[0].textContent;
   renderHeatmap($('cm-heat'), {
     cells: res.cells, xKeys: res.x_keys, yKeys: res.y_keys, xDim: x, yDim: y, metricLabel,
+    xMeta: res.x_meta, yMeta: res.y_meta,
   });
   setTableTwin('cm-heat', [
-    { label: dimLabel(y), key: true, get: c => keyLabel(y, c.y) },
-    { label: dimLabel(x), key: true, get: c => keyLabel(x, c.x) },
+    { label: dimLabel(y), key: true, get: c => keyLabel(y, c.y, (res.y_meta || {})[c.y]) },
+    { label: dimLabel(x), key: true, get: c => keyLabel(x, c.x, (res.x_meta || {})[c.x]) },
     { label: metricLabel, num: true, get: c => fmtNum(c.v) },
     { label: 'Spots', num: true, get: c => fmtInt(c.n) },
   ], res.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)), `${y}-by-${x}`);
@@ -1160,7 +1188,7 @@ async function renderSpots() {
     { label: 'Band', get: s => s.band },
     { label: 'Mode', get: s => spotMode(s) },
     { label: 'SNR', num: true, get: s => fmtNum(s.snr) },
-    { label: 'Country', get: s => s.country || '' },
+    { label: 'Country', get: s => withFlag(s.country_code, s.country || '') },
     { label: 'Cont', get: s => s.continent || '' },
     { label: 'Grid', get: s => s.locator || '' },
     { label: 'km', num: true, get: s => s.distance_km ? fmtInt(s.distance_km) : '' },
@@ -1288,7 +1316,8 @@ async function loadFacets() {
   const sel = $('f-country'), prev = sel.value;
   sel.innerHTML = '<option value="">All countries</option>' +
     (facets.country || []).map(c =>
-      `<option value="${escapeHTML(c.key)}">${escapeHTML(c.name || c.key)} (${fmtInt(c.count)})</option>`).join('');
+      `<option value="${escapeHTML(c.key)}">` +
+      `${escapeHTML(withFlag(c.key, c.name || c.key))} (${fmtInt(c.count)})</option>`).join('');
   sel.value = prev;
 }
 

@@ -308,15 +308,15 @@ func TestPrefixFiltersEscapeWildcards(t *testing.T) {
 // ordered by frequency rather than alphabetically.
 func TestMatrixAxesAndTrim(t *testing.T) {
 	s := newTestStore(t)
-	cells, xKeys, yKeys, err := s.Matrix(dayFilter(t, nil), "hour", "band", "count", 25)
+	cells, axes, err := s.Matrix(dayFilter(t, nil), "hour", "band", "count", 25)
 	if err != nil {
 		t.Fatalf("Matrix: %v", err)
 	}
-	if len(xKeys) != 2 {
-		t.Errorf("x keys = %v, want 2 hours", xKeys)
+	if len(axes.XKeys) != 2 {
+		t.Errorf("x keys = %v, want 2 hours", axes.XKeys)
 	}
-	if strings.Join(yKeys, ",") != "40m,20m" {
-		t.Errorf("band axis = %v, want 40m before 20m (by frequency)", yKeys)
+	if strings.Join(axes.YKeys, ",") != "40m,20m" {
+		t.Errorf("band axis = %v, want 40m before 20m (by frequency)", axes.YKeys)
 	}
 	var total int64
 	for _, c := range cells {
@@ -336,7 +336,7 @@ func TestUnknownDimensionsRejected(t *testing.T) {
 	if _, err := s.Breakdown(f, "callsign; DROP TABLE spots", "count", 10); err == nil {
 		t.Error("Breakdown accepted an unknown dimension")
 	}
-	if _, _, _, err := s.Matrix(f, "hour", "band", "evil", 10); err == nil {
+	if _, _, err := s.Matrix(f, "hour", "band", "evil", 10); err == nil {
 		t.Error("Matrix accepted an unknown metric")
 	}
 	if _, _, err := s.TimeSeries(f, "fortnight", "count", "", 8); err == nil {

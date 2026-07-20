@@ -393,6 +393,10 @@ type statsDim struct {
 	// is neither alphabetical nor numeric — bands, most obviously, where "160m"
 	// belongs beside "80m" rather than between "15m" and "17m".
 	Rank map[string]int
+	// Extra is an optional aggregate returning a companion value for each group,
+	// surfaced as `meta`. Grouping by country name yields the ISO code, which is
+	// what lets the UI draw a flag beside it; grouping by code yields the name.
+	Extra string
 }
 
 // bandRank orders band labels by frequency, using the same table that assigns
@@ -417,8 +421,8 @@ var statsDims = map[string]statsDim{
 	"stream":     {Expr: `stream`, Label: "Source"},
 	"callsign":   {Expr: `callsign`, Label: "Callsign"},
 	"spotter":    {Expr: `spotter`, Label: "Spotter"},
-	"country":    {Expr: `country`, Label: "Country"},
-	"cc":         {Expr: `country_code`, Label: "Country code"},
+	"country":    {Expr: `country`, Label: "Country", Extra: `MAX(country_code)`},
+	"cc":         {Expr: `country_code`, Label: "Country code", Extra: `MAX(country)`},
 	"continent":  {Expr: `continent`, Label: "Continent"},
 	"cq_zone":    {Expr: `cq_zone`, Label: "CQ zone", Numeric: true},
 	"locator":    {Expr: `substr(locator,1,4)`, Label: "Grid square"},
@@ -492,7 +496,10 @@ func StatsMetricsList() []map[string]any {
 // have no data in the group (no SNR on voice-only groups, say) stay nil so the
 // client can render "—" rather than a misleading zero.
 type BreakdownRow struct {
-	Key       string   `json:"key"`
+	Key string `json:"key"`
+	// Meta is the dimension's companion value (see statsDim.Extra); empty for
+	// dimensions that don't define one.
+	Meta      string   `json:"meta,omitempty"`
 	Count     int64    `json:"count"`
 	Calls     int64    `json:"calls"`
 	Countries int64    `json:"countries"`
@@ -531,8 +538,12 @@ func (s *SpotStore) Breakdown(f StatsFilter, dim, sortBy string, limit int) ([]B
 
 	// Ordering is by the requested metric, with count as a stable tiebreak so
 	// equal averages don't shuffle between requests.
+	extra := `''`
+	if d.Extra != "" {
+		extra = d.Extra
+	}
 	q := fmt.Sprintf(`
-		SELECT %s AS k,
+		SELECT %s AS k, %s,
 		       COUNT(*), COUNT(DISTINCT NULLIF(callsign,'')),
 		       COUNT(DISTINCT NULLIF(country_code,'')),
 		       COUNT(DISTINCT NULLIF(spotter,'')), COUNT(DISTINCT NULLIF(band,'')),
@@ -543,7 +554,7 @@ func (s *SpotStore) Breakdown(f StatsFilter, dim, sortBy string, limit int) ([]B
 		GROUP BY k
 		ORDER BY %s DESC, COUNT(*) DESC
 		LIMIT ?`,
-		d.Expr, whereSQL, statsMetrics[sortBy].Expr)
+		d.Expr, extra, whereSQL, statsMetrics[sortBy].Expr)
 	args = append(args, limit)
 
 	rows, err := s.db.Query(q, args...)
@@ -555,14 +566,14 @@ func (s *SpotStore) Breakdown(f StatsFilter, dim, sortBy string, limit int) ([]B
 	out := []BreakdownRow{}
 	for rows.Next() {
 		var r BreakdownRow
-		var key sql.NullString
+		var key, meta sql.NullString
 		var avgSNR, maxSNR, avgDist, maxDist, avgWPM sql.NullFloat64
 		var first, last sql.NullInt64
-		if err := rows.Scan(&key, &r.Count, &r.Calls, &r.Countries, &r.Spotters, &r.Bands,
+		if err := rows.Scan(&key, &meta, &r.Count, &r.Calls, &r.Countries, &r.Spotters, &r.Bands,
 			&avgSNR, &maxSNR, &avgDist, &maxDist, &avgWPM, &first, &last); err != nil {
 			return nil, err
 		}
-		r.Key = key.String
+		r.Key, r.Meta = key.String, meta.String
 		r.AvgSNR, r.MaxSNR = round1(avgSNR), round1(maxSNR)
 		r.AvgDist, r.MaxDist, r.AvgWPM = round1(avgDist), round1(maxDist), round1(avgWPM)
 		r.FirstTS, r.LastTS = first.Int64, last.Int64
@@ -587,18 +598,27 @@ type MatrixCell struct {
 //
 // It returns the cells plus the sorted axis keys, so the client renders a full
 // grid (including empty cells) rather than only the populated ones.
-func (s *SpotStore) Matrix(f StatsFilter, xDim, yDim, metric string, limitY int) ([]MatrixCell, []string, []string, error) {
+// MatrixAxes carries the sorted keys for each axis plus, where the dimension
+// defines one, a key → companion value map (country name → ISO code) so the
+// client can label the axis with a flag.
+type MatrixAxes struct {
+	XKeys, YKeys []string
+	XMeta, YMeta map[string]string
+}
+
+func (s *SpotStore) Matrix(f StatsFilter, xDim, yDim, metric string, limitY int) ([]MatrixCell, MatrixAxes, error) {
+	var axes MatrixAxes
 	x, ok := statsDims[xDim]
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("unknown x %q", xDim)
+		return nil, axes, fmt.Errorf("unknown x %q", xDim)
 	}
 	y, ok := statsDims[yDim]
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("unknown y %q", yDim)
+		return nil, axes, fmt.Errorf("unknown y %q", yDim)
 	}
 	m, ok := statsMetrics[metric]
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("unknown metric %q", metric)
+		return nil, axes, fmt.Errorf("unknown metric %q", metric)
 	}
 	if limitY <= 0 || limitY > 100 {
 		limitY = 25
@@ -611,35 +631,49 @@ func (s *SpotStore) Matrix(f StatsFilter, xDim, yDim, metric string, limitY int)
 		}
 	}
 
+	xExtra, yExtra := `''`, `''`
+	if x.Extra != "" {
+		xExtra = x.Extra
+	}
+	if y.Extra != "" {
+		yExtra = y.Extra
+	}
 	q := fmt.Sprintf(`
-		SELECT %s AS xk, %s AS yk, %s, COUNT(*)
+		SELECT %s AS xk, %s AS yk, %s, %s, %s, COUNT(*)
 		FROM spots
 		WHERE %s
-		GROUP BY xk, yk`, x.Expr, y.Expr, m.Expr, whereSQL)
+		GROUP BY xk, yk`, x.Expr, y.Expr, xExtra, yExtra, m.Expr, whereSQL)
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, axes, err
 	}
 	defer func() { _ = rows.Close() }()
 
 	cells := []MatrixCell{}
 	xSeen, ySeen := map[string]bool{}, map[string]bool{}
+	xMeta, yMeta := map[string]string{}, map[string]string{}
 	yWeight := map[string]int64{} // total spots per y, for trimming to top rows
 	for rows.Next() {
-		var xk, yk sql.NullString
+		var xk, yk, xm, ym sql.NullString
 		var v sql.NullFloat64
 		var n int64
-		if err := rows.Scan(&xk, &yk, &v, &n); err != nil {
-			return nil, nil, nil, err
+		if err := rows.Scan(&xk, &yk, &xm, &ym, &v, &n); err != nil {
+			return nil, axes, err
 		}
 		c := MatrixCell{X: xk.String, Y: yk.String, V: round1(v), N: n}
 		cells = append(cells, c)
 		xSeen[c.X], ySeen[c.Y] = true, true
+		if xm.String != "" {
+			xMeta[c.X] = xm.String
+		}
+		if ym.String != "" {
+			yMeta[c.Y] = ym.String
+		}
 		yWeight[c.Y] += n
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, nil, err
+		return nil, axes, err
 	}
 
 	xKeys := sortedKeys(xSeen, x)
@@ -663,7 +697,8 @@ func (s *SpotStore) Matrix(f StatsFilter, xDim, yDim, metric string, limitY int)
 		}
 		cells = kept
 	}
-	return cells, xKeys, yKeys, nil
+	axes = MatrixAxes{XKeys: xKeys, YKeys: yKeys, XMeta: xMeta, YMeta: yMeta}
+	return cells, axes, nil
 }
 
 // ── Time series ────────────────────────────────────────────────────────────

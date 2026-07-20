@@ -264,6 +264,11 @@ Two things follow the switch that are worth knowing about:
 **Daily and weekly buckets stay UTC** and are labelled as such — they are
 calendar days grouped in SQL, and a day is not the same day in another zone.
 
+Countries are shown with their flag wherever they appear — charts, tables,
+heatmap axes and the country filter — derived from the ISO code in the database
+and rendered as regional-indicator emoji, with the same Twemoji webfont the live
+spot page uses for browsers whose system font lacks flag glyphs.
+
 Every chart has a **Table** button showing the same numbers as text, and every
 table — chart table-views included — has a **⬇ CSV** button. Exports carry the
 underlying values rather than the displayed ones (no thousands separators, empty
@@ -286,8 +291,8 @@ and its drill-down can be driven from one URL.
 | `GET /api/stats/meta` | Available dimensions, metrics, buckets, streams and **mode groups** — the UI builds its pickers from this |
 | `GET /api/stats/facets` | Distinct values actually present under the filter (so a picker never offers a dead end) |
 | `GET /api/stats/summary` | Headline totals for the filter, plus the busiest hour and band |
-| `GET /api/stats/breakdown` | Group by one dimension (`group_by`), ranked by a metric (`sort`, `limit`) |
-| `GET /api/stats/matrix` | Cross-tabulate two dimensions (`x`, `y`, `metric`, `limit_y`) |
+| `GET /api/stats/breakdown` | Group by one dimension (`group_by`), ranked by a metric (`sort`, `limit`). Rows carry a `meta` companion value where the dimension defines one — grouping by `country` returns the ISO code, grouping by `cc` returns the name |
+| `GET /api/stats/matrix` | Cross-tabulate two dimensions (`x`, `y`, `metric`, `limit_y`). `x_meta` / `y_meta` map each axis key to its companion value, as above |
 | `GET /api/stats/series` | Time series (`bucket=hour\|day\|week`, `metric`), optionally split into one series per value of `split_by` |
 | | Hourly and daily series are **gap-filled** across the whole window: quiet buckets come back as `0` for counting metrics and `null` for averages, so a chart shows the silence rather than interpolating over it |
 | | A split series is capped at `max_series` (default 8, max 12). The remainder is **folded into an `Other` series** rather than discarded, so the total still accounts for every spot — folding only applies to `count`, the one metric that can legitimately be summed across series |
