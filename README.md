@@ -184,6 +184,16 @@ explicit UTC date range, band, mode, continent, country, source stream, callsign
 prefix, spotter prefix, grid prefix, SNR range, distance range, UTC hour-of-day
 window (which may wrap midnight), and a comment/message substring.
 
+Note the difference between **Source** and **Mode**: Source is which stream
+produced the spot (Digital decoder / CW skimmer / voice detector / upstream DX
+cluster), Mode is the modulation within it. The mode picker is grouped by source
+to make the relationship visible. Digital fans out into FT8, FT4, WSPR, JS8 and
+FT2, and Voice into USB and LSB — but the CW skimmer only ever decodes CW, so
+`source = CW` and `mode = CW` select the same spots today. They are not the same
+question: if a spot with mode CW ever arrived from another source, `mode=CW`
+would find it and `source=CW` would not. Upstream DX cluster spots carry no mode
+field at all, so they are reachable by source but never by mode.
+
 The **mode picker** is built from the cluster's own list of modes
 (`StreamModes` in `spot.go`, served via `/api/stats/meta`), grouped by the
 source that produces them — Digital (FT8, FT4, WSPR, JS8, FT2), CW, and Voice
@@ -197,8 +207,10 @@ pickers are the opposite case and are driven purely by what the database holds.
 **Tabs:**
 
 - **Overview** — headline totals (spots, unique callsigns, countries, spotters,
-  average SNR, furthest spot), activity over time on a real time axis, and the
-  leading countries, bands, modes and callsigns. The time chart's interval
+  average SNR, furthest spot), activity over time on a real time axis, and
+  breakdowns by source, country, band, mode and callsign. Sources are shown
+  under their display names (Digital, CW, Voice, DX cluster) rather than the raw
+  stream keys. The time chart's interval
   (hourly / daily / weekly, or automatic) and its split (total, or one line per
   band / mode / source / continent) are both selectable, so *"the last 24 hours
   of FT8 from Germany on 40m, by hour"* is the period plus three filters.
@@ -215,13 +227,24 @@ pickers are the opposite case and are driven purely by what the database holds.
   spotted this callsign?"** — enter a callsign for an exact-match list of every
   spot of it in the period, with the spotter, time, frequency, band, mode, SNR
   and comment, plus a per-spotter tally.
+
+  **Click any spotter callsign to exclude it.** This receiver's own skimmer
+  submits most of the spots on its own cluster and would otherwise top every
+  ranking; excluding it shows everyone else. Excluded stations appear as badges
+  in the Filters bar — click the `×` on a badge to bring one back, or *Clear
+  exclusions* to drop them all. Exclusions apply to every tab and are remembered
+  in the browser, since "not me" is a standing preference rather than a one-off.
 - **Compare** — an arbitrary cross-tab: pick any two dimensions and a metric and
   read the result as a heatmap (hour × country, band × continent, weekday ×
   mode, …).
 - **Spots** — the raw rows behind any aggregate, paged, with CSV download.
 
 Every chart has a **Table** button showing the same numbers as text, and all
-times are UTC.
+times are UTC. While a query is running the previous charts are held at reduced
+opacity — never blanked, so nothing jumps when the new data lands — and a
+spinner names what is being fetched ("Loading best-time analysis…"). It appears
+only after ~120 ms, so quick queries don't flash, and it respects
+`prefers-reduced-motion`.
 
 ### Stats API
 
@@ -238,17 +261,19 @@ and its drill-down can be driven from one URL.
 | `GET /api/stats/matrix` | Cross-tabulate two dimensions (`x`, `y`, `metric`, `limit_y`) |
 | `GET /api/stats/series` | Time series (`bucket=hour\|day\|week`, `metric`), optionally split into one series per value of `split_by` |
 | | Hourly and daily series are **gap-filled** across the whole window: quiet buckets come back as `0` for counting metrics and `null` for averages, so a chart shows the silence rather than interpolating over it |
+| | A split series is capped at `max_series` (default 8, max 12). The remainder is **folded into an `Other` series** rather than discarded, so the total still accounts for every spot — folding only applies to `count`, the one metric that can legitimately be summed across series |
 | `GET /api/stats/spots` | The raw filtered spots (`limit`, `offset`), newest first |
 
 **Filter parameters** (shared by all of the above):
 
 | Parameter | Meaning |
 |-----------|---------|
-| `days` / `hours` | Relative lookback; defaults to the last 7 days |
+| `days` / `hours` | Relative lookback; defaults to the last 24 hours, matching the dashboard |
 | `from` / `to` | Absolute bounds — RFC3339, `YYYY-MM-DD`, or Unix seconds |
 | `band`, `mode`, `stream`, `continent`, `country_code`, `country`, `cq_zone` | Multi-value (repeat the parameter or comma-separate); values OR within a parameter and AND across parameters |
 | `callsign`, `spotter`, `locator` | Prefix match (a trailing `*` is accepted and ignored) |
 | `callsign_exact`, `spotter_exact` | Exact match — use these to look a station up rather than browse a prefix, so `G3ABC` does not also return `G3ABCD` |
+| `callsign_exclude`, `spotter_exclude` | Multi-value exclusions, removing those stations from every count and listing. Spots that have no spotter at all are kept |
 | `q` | Substring of the spot comment or message |
 | `snr_min` / `snr_max` | SNR bounds in dB |
 | `dist_min` / `dist_max` | Distance bounds in km |
@@ -291,10 +316,11 @@ hour (one point per hour, zeroes included):
 GET /api/stats/series?hours=24&band=40m&mode=FT8&country_code=DE&bucket=hour
 ```
 
-**Example** — the spotter leaderboard for the last week, busiest first:
+**Example** — the spotter leaderboard for the last week, busiest first, leaving
+out this receiver's own skimmer:
 
 ```
-GET /api/stats/breakdown?days=7&stream=dxcluster,localspot,cwskimmer&group_by=spotter&sort=count
+GET /api/stats/breakdown?days=7&stream=dxcluster,localspot,cwskimmer&group_by=spotter&sort=count&spotter_exclude=M9PSY-%23
 ```
 
 **Example** — who spotted G3ABC, and every spot of it with frequency and time:

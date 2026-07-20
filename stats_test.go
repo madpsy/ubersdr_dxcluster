@@ -25,7 +25,10 @@ func newTestStore(t *testing.T) *SpotStore {
 		// 40m, Germany: three spots clustered at 20:00 UTC, one at 08:00.
 		{Stream: StreamDecoder, Timestamp: at(20), Band: "40m", Callsign: "DL1AAA", FreqHz: 7074000, SNR: -5, Country: "Germany", CountryCode: "DE", Continent: "EU", Mode: "FT8", DistanceKM: 800},
 		{Stream: StreamDecoder, Timestamp: at(20), Band: "40m", Callsign: "DL2BBB", FreqHz: 7074000, SNR: -9, Country: "Germany", CountryCode: "DE", Continent: "EU", Mode: "FT8", DistanceKM: 900},
-		{Stream: StreamCWSkimmer, Timestamp: at(20), Band: "40m", Callsign: "DL3CCC", FreqHz: 7030000, SNR: 12, Country: "Germany", CountryCode: "DE", Continent: "EU", Mode: "CW", WPM: 25, Spotter: "G3ABC", DistanceKM: 850},
+		// Deliberately NO Mode: this is how CW skimmer spots were stored before
+		// parseCWSpot recorded one, and how every historical row still looks.
+		// The mode dimension has to derive "CW" from the stream.
+		{Stream: StreamCWSkimmer, Timestamp: at(20), Band: "40m", Callsign: "DL3CCC", FreqHz: 7030000, SNR: 12, Country: "Germany", CountryCode: "DE", Continent: "EU", WPM: 25, Spotter: "G3ABC", DistanceKM: 850},
 		{Stream: StreamDecoder, Timestamp: at(8), Band: "40m", Callsign: "DL4DDD", FreqHz: 7074000, SNR: -18, Country: "Germany", CountryCode: "DE", Continent: "EU", Mode: "FT8", DistanceKM: 820},
 		// 20m, Japan: one spot at 08:00.
 		{Stream: StreamDecoder, Timestamp: at(8), Band: "20m", Callsign: "JA1XYZ", FreqHz: 14074000, SNR: -3, Country: "Japan", CountryCode: "JP", Continent: "AS", Mode: "FT8", DistanceKM: 9500},
@@ -59,8 +62,8 @@ func TestParseStatsFilterWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default: %v", err)
 	}
-	if d := f.To.Sub(f.From); d < 6*24*time.Hour || d > 8*24*time.Hour {
-		t.Errorf("default window = %v, want ~7 days", d)
+	if d := f.To.Sub(f.From); d < 23*time.Hour || d > 25*time.Hour {
+		t.Errorf("default window = %v, want ~24 hours", d)
 	}
 
 	f, err = ParseStatsFilter(url.Values{"hours": {"6"}})
@@ -172,6 +175,84 @@ func TestModeFallsBackToVoiceMode(t *testing.T) {
 	}
 	if sum["spots"].(int64) != 1 {
 		t.Errorf("mode=USB spots = %v, want 1", sum["spots"])
+	}
+}
+
+// TestCWSpotsAreFindableByMode is a regression test for CW spots reporting a
+// count of zero. The upstream cw_spot event carries no mode, so historical rows
+// have an empty mode column and the dimension must derive "CW" from the stream.
+func TestCWSpotsAreFindableByMode(t *testing.T) {
+	s := newTestStore(t)
+
+	// The fixture's CW spot has no stored mode — exactly like a real one.
+	spots, _, err := s.ListSpots(dayFilter(t, url.Values{"stream": {"cwskimmer"}}), 10, 0)
+	if err != nil {
+		t.Fatalf("ListSpots: %v", err)
+	}
+	if len(spots) != 1 || spots[0].Mode != "" {
+		t.Fatalf("fixture CW spot should have an empty mode column, got %+v", spots)
+	}
+
+	// It must still be filterable by mode…
+	sum, err := s.Summary(dayFilter(t, url.Values{"mode": {"CW"}}))
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got := sum["spots"].(int64); got != 1 {
+		t.Errorf("mode=CW spots = %d, want 1 — CW must be derived from the stream", got)
+	}
+
+	// …and must appear as a group, so the mode picker shows a real count.
+	rows, err := s.Breakdown(dayFilter(t, nil), "mode", "count", 10)
+	if err != nil {
+		t.Fatalf("Breakdown: %v", err)
+	}
+	var cw int64 = -1
+	for _, r := range rows {
+		if r.Key == "CW" {
+			cw = r.Count
+		}
+	}
+	if cw != 1 {
+		t.Errorf("CW group count = %d, want 1 (it was absent entirely before the fix)", cw)
+	}
+}
+
+// TestParseCWSpotRecordsMode covers the ingest half of the same fix: new CW
+// spots carry the mode explicitly rather than relying on the SQL fallback.
+func TestParseCWSpotRecordsMode(t *testing.T) {
+	raw := []byte(`{"type":"cw_spot","band":"40m","frequency":7030000,"callsign":"DL3CCC",
+		"spotter":"G3ABC","snr":12,"wpm":25,"timestamp":"2026-07-20T12:00:00Z","comment":"CQ"}`)
+	sp, err := parseCWSpot(raw)
+	if err != nil {
+		t.Fatalf("parseCWSpot: %v", err)
+	}
+	if sp == nil {
+		t.Fatal("parseCWSpot returned nil for a valid cw_spot")
+	}
+	if sp.Mode != "CW" {
+		t.Errorf("mode = %q, want CW", sp.Mode)
+	}
+}
+
+// TestDXClusterSpotsHaveNoMode documents the deliberate gap: upstream DX
+// cluster spots carry no mode field at all, so they are reachable by source but
+// never by mode. If that ever changes, this test should fail loudly.
+func TestDXClusterSpotsHaveNoMode(t *testing.T) {
+	raw := []byte(`{"type":"dx_spot","frequency":14200000,"dx_call":"DL1ABC",
+		"spotter":"G3ABC","band":"20m","timestamp":"2026-07-20T12:00:00Z","comment":"CQ DX"}`)
+	sp, err := parseDXSpot(raw)
+	if err != nil {
+		t.Fatalf("parseDXSpot: %v", err)
+	}
+	if sp.Mode != "" || sp.VoiceMode != "" {
+		t.Errorf("DX cluster spot has mode %q/%q; the mode pickers assume none",
+			sp.Mode, sp.VoiceMode)
+	}
+	// And the canonical mode list must agree, so the UI doesn't offer a group
+	// that can never match anything.
+	if len(StreamModes[StreamDXCluster]) != 0 {
+		t.Errorf("StreamModes[dxcluster] = %v, want empty", StreamModes[StreamDXCluster])
 	}
 }
 
@@ -290,13 +371,51 @@ func TestTimeSeriesSplitAndCap(t *testing.T) {
 		t.Errorf("series total = %d, want 6", total)
 	}
 
-	// A cap of 1 must drop the quieter band entirely.
-	_, names, err = s.TimeSeries(dayFilter(t, nil), "day", "count", "band", 1)
+	// A cap of 1 must fold the quieter band into "Other" rather than dropping
+	// it, so the chart still accounts for every spot in the period.
+	capped, names, err := s.TimeSeries(dayFilter(t, nil), "day", "count", "band", 1)
 	if err != nil {
 		t.Fatalf("TimeSeries capped: %v", err)
 	}
-	if len(names) != 1 || names[0] != "40m" {
-		t.Errorf("capped series = %v, want [40m]", names)
+	if len(names) != 2 || names[0] != "40m" || names[1] != OtherSeriesName {
+		t.Fatalf("capped series = %v, want [40m Other]", names)
+	}
+	var cappedTotal int64
+	for _, n := range names {
+		for _, p := range capped[n] {
+			cappedTotal += p.N
+		}
+	}
+	if cappedTotal != total {
+		t.Errorf("folded total = %d, want %d — folding must not lose spots", cappedTotal, total)
+	}
+	// "Other" holds the two 20m spots.
+	var other float64
+	for _, p := range capped[OtherSeriesName] {
+		if p.V != nil {
+			other += *p.V
+		}
+	}
+	if other != 2 {
+		t.Errorf("Other = %v, want 2 (the 20m spots)", other)
+	}
+}
+
+// TestTimeSeriesDoesNotFoldUnsummableMetrics guards the other half: averages
+// and distinct counts cannot be added across series, so they are not folded.
+func TestTimeSeriesDoesNotFoldUnsummableMetrics(t *testing.T) {
+	s := newTestStore(t)
+	for _, metric := range []string{"avg_snr", "calls"} {
+		_, names, err := s.TimeSeries(dayFilter(t, nil), "day", metric, "band", 1)
+		if err != nil {
+			t.Fatalf("TimeSeries %s: %v", metric, err)
+		}
+		for _, n := range names {
+			if n == OtherSeriesName {
+				t.Errorf("metric %s produced an %q series; it is not summable",
+					metric, OtherSeriesName)
+			}
+		}
 	}
 }
 
@@ -570,8 +689,11 @@ func TestWhoSpottedCallsign(t *testing.T) {
 	if got.FreqHz != 7030000 {
 		t.Errorf("freq = %v, want 7030000", got.FreqHz)
 	}
-	if got.Band != "40m" || got.Mode != "CW" || got.WPM != 25 {
-		t.Errorf("band/mode/wpm = %s/%s/%d, want 40m/CW/25", got.Band, got.Mode, got.WPM)
+	// The stored mode column is empty on historical CW rows — the CW-ness lives
+	// in the stream. TestCWSpotsAreFindableByMode covers the derived view.
+	if got.Band != "40m" || got.Stream != StreamCWSkimmer || got.WPM != 25 {
+		t.Errorf("band/stream/wpm = %s/%s/%d, want 40m/cwskimmer/25",
+			got.Band, got.Stream, got.WPM)
 	}
 	if got.Timestamp.IsZero() {
 		t.Error("spot has no timestamp")
@@ -583,6 +705,90 @@ func TestWhoSpottedCallsign(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Key != "G3ABC" {
 		t.Errorf("spotters of DL3CCC = %+v, want just G3ABC", rows)
+	}
+}
+
+// TestSpotterExclusion covers taking a station out of the rankings — the
+// receiver's own skimmer otherwise tops every list on its own cluster.
+func TestSpotterExclusion(t *testing.T) {
+	s := newTestStore(t)
+
+	rows, err := s.Breakdown(dayFilter(t, nil), "spotter", "count", 50)
+	if err != nil {
+		t.Fatalf("Breakdown: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("baseline spotter rows = %d, want 1", len(rows))
+	}
+
+	rows, err = s.Breakdown(dayFilter(t, url.Values{"spotter_exclude": {"G3ABC"}}), "spotter", "count", 50)
+	if err != nil {
+		t.Fatalf("Breakdown excluded: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("spotter rows after excluding G3ABC = %+v, want none", rows)
+	}
+
+	// Case-insensitive on input, since the badge round-trips through a URL.
+	sum, err := s.Summary(dayFilter(t, url.Values{"spotter_exclude": {"g3abc"}}))
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got := sum["spots"].(int64); got != 5 {
+		t.Errorf("spots with G3ABC excluded = %d, want 5 of 6", got)
+	}
+}
+
+// TestExclusionKeepsRowsWithNoValue is the subtle half: `col NOT IN (…)` is
+// NULL — and therefore false — when col is NULL, so a naive exclusion would
+// also drop every spot that has no spotter at all.
+func TestExclusionKeepsRowsWithNoValue(t *testing.T) {
+	s := newTestStore(t)
+
+	// Five of the six fixture spots have no spotter; excluding someone else
+	// must leave all five in place.
+	sum, err := s.Summary(dayFilter(t, url.Values{"spotter_exclude": {"NOBODY"}}))
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got := sum["spots"].(int64); got != 6 {
+		t.Errorf("spots excluding an absent spotter = %d, want all 6", got)
+	}
+
+	sum, err = s.Summary(dayFilter(t, url.Values{"spotter_exclude": {"G3ABC"}}))
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got := sum["spots"].(int64); got != 5 {
+		t.Errorf("spots excluding G3ABC = %d, want 5 — the spotter-less spots must survive", got)
+	}
+}
+
+// TestCallsignExclusionMulti checks that several exclusions combine, and that
+// they apply to the spot listing as well as the aggregates.
+func TestCallsignExclusionMulti(t *testing.T) {
+	s := newTestStore(t)
+	f := dayFilter(t, url.Values{"callsign_exclude": {"DL1AAA,DL2BBB"}})
+
+	sum, err := s.Summary(f)
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got := sum["spots"].(int64); got != 4 {
+		t.Errorf("spots = %d, want 4 of 6", got)
+	}
+
+	spots, total, err := s.ListSpots(f, 100, 0)
+	if err != nil {
+		t.Fatalf("ListSpots: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("listing total = %d, want 4", total)
+	}
+	for _, sp := range spots {
+		if sp.Callsign == "DL1AAA" || sp.Callsign == "DL2BBB" {
+			t.Errorf("excluded callsign %q present in the listing", sp.Callsign)
+		}
 	}
 }
 

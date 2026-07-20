@@ -24,10 +24,13 @@ const slotRegistry = new Map(); // entity name → slot index, sticky for the se
 // assignColors returns name → hex for the names in this render. Already-known
 // entities keep their slot unless an earlier name in this render holds it, in
 // which case the newcomer takes the lowest free slot.
+const OTHER_SERIES = 'Other';
+
 function assignColors(names) {
   const taken = new Set(), out = {};
   const pending = [];
   for (const n of names) {
+    if (n === OTHER_SERIES) continue;
     const s = slotRegistry.get(n);
     if (s !== undefined && !taken.has(s)) { taken.add(s); out[n] = s; }
     else pending.push(n);
@@ -38,7 +41,9 @@ function assignColors(names) {
     taken.add(s); slotRegistry.set(n, s); out[n] = s;
   }
   const hex = {};
-  for (const n of names) hex[n] = cssVar(SERIES[out[n] % SERIES.length]);
+  for (const n of names) {
+    hex[n] = n === OTHER_SERIES ? cssVar('--muted') : cssVar(SERIES[out[n] % SERIES.length]);
+  }
   return hex;
 }
 
@@ -59,6 +64,7 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 // keyLabel renders a raw group key for the dimension it came from.
 function keyLabel(dim, key) {
   if (key === '' || key === null || key === undefined) return '—';
+  if (dim === 'stream') return streamLabel(key);
   if (dim === 'hour') return fmtHour(key);
   if (dim === 'weekday') return WEEKDAYS[+key] || key;
   if (dim === 'snr_bucket') return `${key} to ${+key + 5} dB`;
@@ -74,6 +80,19 @@ function bucketLabel(bucket, raw, prev) {
   const hhmm = raw.slice(11, 16);
   const day = raw.slice(0, 10);
   return (prev && prev.slice(0, 10) === day) ? hhmm : `${hhmm} · ${day.slice(5)}`;
+}
+
+// spotMode resolves a spot's mode the same way the SQL modeExpr does: digital
+// spots carry it directly, voice spots keep USB/LSB in voice_mode, and CW
+// skimmer spots carry none at all — the stream is the mode.
+function spotMode(s) {
+  return s.mode || s.voice_mode || (s.stream === 'cwskimmer' ? 'CW' : '');
+}
+
+// streamLabel turns a stored stream key into its display name, falling back to
+// the key itself if the server ever reports a stream the UI doesn't know.
+function streamLabel(key) {
+  return (META.stream_labels || {})[key] || key;
 }
 
 function fmtTS(sec) {
@@ -171,6 +190,8 @@ function renderLines(host, opts) {
   });
 
   const colors = assignColors(names);
+  const nameOf = opts.seriesLabel || ((n) => n);
+  const endpoints = [];
   for (const n of names) {
     // Lay the series out along the x axis first: a slot per tick, null where
     // there is no data. That makes gaps explicit and the rest a single pass.
@@ -199,7 +220,25 @@ function renderLines(host, opts) {
     // Direct-label the endpoint when there are few enough series to stay
     // legible. A lone series needs no label — the chart title names it.
     if (names.length > 1 && names.length <= 4) {
-      el('text', { class: 'mark-label', x: X(last) + 6, y: Y(at[last]) + 3, fill: colors[n] }, svg).textContent = n;
+      endpoints.push({ n, x: X(last), y: Y(at[last]) });
+    }
+  }
+
+  // Series that converge — all falling to zero at the end of the window, say —
+  // would otherwise stack their labels into an unreadable blur. Spread them
+  // vertically, keeping the original order, and clamp to the plot.
+  if (endpoints.length) {
+    const GAP = 12;
+    endpoints.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < endpoints.length; i++) {
+      endpoints[i].y = Math.max(endpoints[i].y, endpoints[i - 1].y + GAP);
+    }
+    const overflow = endpoints[endpoints.length - 1].y - (m.t + ih);
+    if (overflow > 0) for (const e of endpoints) e.y -= overflow;
+    for (const e of endpoints) {
+      e.y = Math.max(m.t + 4, e.y);
+      el('text', { class: 'mark-label', x: e.x + 6, y: e.y + 3, fill: colors[e.n] }, svg)
+        .textContent = nameOf(e.n);
     }
   }
 
@@ -213,14 +252,14 @@ function renderLines(host, opts) {
       const lines = names.map(n => {
         const p = series[n].find(q => q.label === l);
         if (!p || p.v === null) return '';
-        return `<div><span style="color:${colors[n]}">■</span> ${escapeHTML(n)}: <b>${fmtNum(p.v)}</b></div>`;
+        return `<div><span style="color:${colors[n]}">■</span> ${escapeHTML(nameOf(n))}: <b>${fmtNum(p.v)}</b></div>`;
       }).join('');
       showTip(e, `<b>${escapeHTML(l)}</b>${lines}`);
     });
     r.addEventListener('mouseleave', () => { cross.setAttribute('opacity', 0); hideTip(); });
   });
 
-  if (names.length >= 2) host.appendChild(legendEl(names, colors));
+  if (names.length >= 2) host.appendChild(legendEl(names, colors, nameOf));
 }
 
 /* ── Chart: vertical bars ──────────────────────────────────────────────── */
@@ -307,8 +346,13 @@ function renderHBars(host, opts) {
     const hit = el('rect', { class: 'hit', x: 0, y: y - 1, width: W, height: rowH }, svg);
     hit.addEventListener('mousemove', (e) => showTip(e,
       `<b>${escapeHTML(keyLabel(dim, r.key))}</b><div>${escapeHTML(metricLabel)}: <b>${fmtNum(r.v)}</b></div>` +
-      (r.n !== undefined ? `<div>from ${fmtInt(r.n)} spots</div>` : '')));
+      (r.n !== undefined ? `<div>from ${fmtInt(r.n)} spots</div>` : '') +
+      (opts.onPick ? '<div style="color:var(--s7)">click to exclude</div>' : '')));
     hit.addEventListener('mouseleave', hideTip);
+    if (opts.onPick) {
+      hit.style.cursor = 'pointer';
+      hit.addEventListener('click', () => { hideTip(); opts.onPick(r.key); });
+    }
   });
 }
 
@@ -372,11 +416,12 @@ function empty(host) {
   host.innerHTML = '<div class="no-data">No spots match these filters</div>';
 }
 
-function legendEl(names, colors) {
+function legendEl(names, colors, nameOf) {
+  const label = nameOf || ((n) => n);
   const d = document.createElement('div');
   d.className = 'legend';
   d.innerHTML = names.map(n =>
-    `<span class="legend-item"><span class="legend-swatch" style="background:${colors[n]}"></span>${escapeHTML(n)}</span>`
+    `<span class="legend-item"><span class="legend-swatch" style="background:${colors[n]}"></span>${escapeHTML(label(n))}</span>`
   ).join('');
   return d;
 }
@@ -393,7 +438,11 @@ function buildTable(cols, rows) {
     '<thead><tr>' + cols.map(c => `<th class="${c.num ? 'num' : ''}">${escapeHTML(c.label)}</th>`).join('') + '</tr></thead>' +
     '<tbody>' + rows.map(r => '<tr>' + cols.map(c => {
       const v = c.get(r);
-      return `<td class="${c.num ? 'num' : ''} ${c.key ? 'key-cell' : ''}">${escapeHTML(v === null || v === undefined ? '—' : v)}</td>`;
+      const cls = [c.num ? 'num' : '', c.key ? 'key-cell' : '', c.exclude ? 'excludable' : ''].join(' ');
+      const attrs = c.exclude
+        ? ` data-exclude="${c.exclude}" data-value="${escapeHTML(v)}" title="Click to exclude ${escapeHTML(v)}"`
+        : '';
+      return `<td class="${cls}"${attrs}>${escapeHTML(v === null || v === undefined ? '—' : v)}</td>`;
     }).join('') + '</tr>').join('') + '</tbody>';
   return t;
 }
@@ -424,6 +473,68 @@ document.addEventListener('click', (e) => {
   host.parentElement.appendChild(wrap);
   renderTwin(hostId, wrap);
   btn.classList.add('on');
+});
+
+/* ── Exclusions ────────────────────────────────────────────────────────────
+ * A receiver's own skimmer submits most of the spots on its own cluster, so it
+ * sits at the top of every ranking and flattens everyone else. Exclusions are
+ * part of the shared filter, and persist per browser: "not me" is a standing
+ * preference, not something to re-apply on every visit.
+ */
+const EXCLUDE_KEY = 'dxstats.exclude.v1';
+const excluded = { spotter: new Set(), callsign: new Set() };
+
+function loadExclusions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXCLUDE_KEY) || '{}');
+    for (const kind of ['spotter', 'callsign']) {
+      for (const v of (saved[kind] || [])) excluded[kind].add(v);
+    }
+  } catch (e) { /* corrupt or unavailable storage — start with none */ }
+}
+
+function saveExclusions() {
+  try {
+    localStorage.setItem(EXCLUDE_KEY, JSON.stringify({
+      spotter: [...excluded.spotter], callsign: [...excluded.callsign],
+    }));
+  } catch (e) { /* private mode — exclusions just won't persist */ }
+}
+
+function exclude(kind, value) {
+  const v = String(value || '').trim().toUpperCase();
+  if (!v || excluded[kind].has(v)) return;
+  excluded[kind].add(v);
+  saveExclusions();
+  renderExclusions();
+  refresh();
+}
+
+function unexclude(kind, value) {
+  excluded[kind].delete(value);
+  saveExclusions();
+  renderExclusions();
+  refresh();
+}
+
+// renderExclusions draws the badge bar. It stays hidden while nothing is
+// excluded, so the filter row doesn't carry an empty widget around.
+function renderExclusions() {
+  const bar = $('exclude-bar'), chips = $('exclude-chips');
+  const all = [...[...excluded.spotter].map(v => ['spotter', v]),
+               ...[...excluded.callsign].map(v => ['callsign', v])];
+  bar.hidden = all.length === 0;
+  chips.innerHTML = all.map(([kind, v]) =>
+    `<span class="exclude-chip"><span class="kind">${kind === 'spotter' ? 'spotter' : 'call'}</span>` +
+    `${escapeHTML(v)}<button title="Include ${escapeHTML(v)} again" ` +
+    `data-unexclude="${kind}" data-value="${escapeHTML(v)}">×</button></span>`).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-unexclude]');
+  if (btn) { unexclude(btn.dataset.unexclude, btn.dataset.value); return; }
+  const cell = e.target.closest('[data-exclude]');
+  if (cell) exclude(cell.dataset.exclude, cell.dataset.value);
 });
 
 /* ── Filter state ──────────────────────────────────────────────────────── */
@@ -459,6 +570,9 @@ function filterQS(extra) {
     const v = $(id).value.trim();
     if (v !== '') p.set(key, v);
   }
+  if (excluded.spotter.size) p.set('spotter_exclude', [...excluded.spotter].join(','));
+  if (excluded.callsign.size) p.set('callsign_exclude', [...excluded.callsign].join(','));
+
   for (const k in (extra || {})) if (extra[k] !== '' && extra[k] !== undefined) p.set(k, extra[k]);
   return p.toString();
 }
@@ -472,6 +586,34 @@ function windowHours() {
   return isFinite(a) && isFinite(b) ? Math.max(1, (b - a) / 36e5) : 168;
 }
 
+/* ── Loading indicator ─────────────────────────────────────────────────────
+ * The previous render is held at reduced opacity rather than replaced by a
+ * skeleton, so nothing shifts when the data lands. This adds the missing half:
+ * a spinner saying what is being fetched.
+ */
+const TAB_LABELS = {
+  overview: 'overview', besttime: 'best-time analysis', rankings: 'rankings',
+  spotters: 'spotter activity', compare: 'cross-tab', spots: 'spots',
+};
+
+let busyTimer = null;
+
+// setBusy shows the indicator after a short delay, so a fast query doesn't
+// produce a flash of spinner that is gone before it can be read.
+function setBusy(on, text) {
+  const box = $('busy');
+  clearTimeout(busyTimer);
+  if (!on) {
+    box.hidden = true;
+    document.body.removeAttribute('aria-busy');
+    return;
+  }
+  $('busy-text').textContent = text;
+  document.body.setAttribute('aria-busy', 'true');
+  if (!box.hidden) return; // already showing — just swap the text
+  busyTimer = setTimeout(() => { box.hidden = false; }, 120);
+}
+
 /* ── Fetching ──────────────────────────────────────────────────────────── */
 let inflight = 0;
 async function get(path, extra) {
@@ -479,22 +621,46 @@ async function get(path, extra) {
   const res = await fetch(url);
   const body = await res.json().catch(() => ({ error: 'bad response' }));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  updateHeader(body);
   return body;
+}
+
+// updateHeader keeps the window and spot-count pills current from whatever the
+// active tab happened to fetch. Scoped queries (a single callsign lookup, say)
+// carry their own narrower filter, so only unscoped responses count.
+function updateHeader(body) {
+  if (body.filter && body.filter.from && body.filter.to) {
+    $('hdr-window').textContent = body.filter.from.slice(0, 10) + ' → ' + body.filter.to.slice(0, 10);
+  }
+  if (!body.filter) return;
+  // A lookup narrows to one station, and the Spotters tab implicitly narrows to
+  // the spotter-bearing streams. Neither is what the user set in the filter row,
+  // so neither should redefine the headline count.
+  if (body.filter.callsign_exact || body.filter.spotter_exact) return;
+  const userStreams = Array.from(document.querySelectorAll('.f-stream:checked')).map(c => c.value);
+  if ((body.filter.stream || []).length !== userStreams.length) return;
+  const total = body.summary ? body.summary.spots : body.total;
+  if (total !== undefined) $('hdr-spots').textContent = fmtInt(total);
 }
 
 // run wraps a render pass: it dims the current content rather than replacing it
 // with a skeleton, so a refetch never causes a layout jump.
-async function run(fn) {
+async function run(fn, what) {
   inflight++;
   document.body.classList.add('loading');
-  $('tab-status').textContent = 'Loading…';
+  setBusy(true, `Loading ${what || TAB_LABELS[activeTab] || 'data'}…`);
+  // The spinner reports progress; this slot is left for errors alone, so the
+  // two don't say the same thing in two places.
+  $('tab-status').textContent = '';
   try {
     await fn();
-    $('tab-status').textContent = '';
   } catch (e) {
     $('tab-status').textContent = 'Error: ' + e.message;
   } finally {
-    if (--inflight === 0) document.body.classList.remove('loading');
+    if (--inflight === 0) {
+      document.body.classList.remove('loading');
+      setBusy(false);
+    }
   }
 }
 
@@ -505,9 +671,10 @@ async function renderOverview() {
   const bucket = chosen === 'auto' ? (windowHours() <= 96 ? 'hour' : 'day') : chosen;
   const split = $('ov-split').value;
 
-  const [sum, ser, countries, bands, modes, calls] = await Promise.all([
+  const [sum, ser, streams, countries, bands, modes, calls] = await Promise.all([
     get('summary'),
-    get('series', { bucket, metric: 'count', split_by: split, max_series: 7 }),
+    get('series', { bucket, metric: 'count', split_by: split, max_series: 7 }),  // + folded "Other"
+    get('breakdown', { group_by: 'stream', sort: 'count', limit: 10 }),
     get('breakdown', { group_by: 'country', sort: 'count', limit: 12 }),
     get('breakdown', { group_by: 'band', sort: 'count', limit: 14 }),
     get('breakdown', { group_by: 'mode', sort: 'count', limit: 10 }),
@@ -515,9 +682,6 @@ async function renderOverview() {
   ]);
 
   const s = sum.summary;
-  $('hdr-spots').textContent = fmtInt(s.spots);
-  $('hdr-window').textContent = sum.filter.from.slice(0, 10) + ' → ' + sum.filter.to.slice(0, 10);
-
   $('ov-tiles').innerHTML = [
     tile('Spots', fmtInt(s.spots), s.per_hour ? `${fmtNum(s.per_hour)} per hour` : ''),
     tile('Unique callsigns', fmtInt(s.callsigns), ''),
@@ -534,10 +698,13 @@ async function renderOverview() {
     series: ser.series, names: ser.names, xLabels,
     metricLabel: `Spots per ${bucket} (UTC)`,
     tickLabel: (l, i, prev) => bucketLabel(bucket, l, prev),
+    seriesLabel: (n) => n === OTHER_SERIES ? n : keyLabel(split, n),
   });
   setTableTwin('ov-series', [
     { label: bucket === 'hour' ? 'Hour (UTC)' : 'Date', get: r => r.label },
-    ...ser.names.map(n => ({ label: n, num: true, get: r => fmtNum(r[n]) })),
+    ...ser.names.map(n => ({
+      label: n === OTHER_SERIES ? n : keyLabel(split, n), num: true, get: r => fmtNum(r[n]),
+    })),
   ], xLabels.map(l => {
     const row = { label: l };
     for (const n of ser.names) {
@@ -547,6 +714,7 @@ async function renderOverview() {
     return row;
   }));
 
+  hbarCard('ov-streams', streams.rows, 'stream', 'Spots');
   hbarCard('ov-countries', countries.rows, 'country', 'Spots');
   hbarCard('ov-bands', bands.rows, 'band', 'Spots');
   hbarCard('ov-modes', modes.rows, 'mode', 'Spots');
@@ -581,6 +749,7 @@ function hbarCard(hostId, rows, dim, metricLabel) {
 
 /* ── Tab: Best Time ────────────────────────────────────────────────────── */
 async function renderBestTime() {
+  get('summary').catch(() => {}); // header only; failure is not worth surfacing
   const metric = $('bt-metric').value;
   const [byHour, heat] = await Promise.all([
     get('breakdown', { group_by: 'hour', sort: 'count', limit: 24 }),
@@ -663,6 +832,7 @@ function describeScope() {
 
 /* ── Tab: Rankings ─────────────────────────────────────────────────────── */
 async function renderRankings() {
+  get('summary').catch(() => {}); // header only; failure is not worth surfacing
   const dim = $('rk-dim').value, metric = $('rk-metric').value, limit = $('rk-limit').value;
   const res = await get('breakdown', { group_by: dim, sort: metric, limit });
   const metricLabel = $('rk-metric').selectedOptions[0].textContent;
@@ -715,6 +885,9 @@ function spotterScope(extra) {
 }
 
 async function renderSpotters() {
+  // The tiles below are scoped to spotter-bearing streams; this unscoped call
+  // is purely so the header keeps reporting the whole filtered period.
+  get('summary').catch(() => {});
   const metric = $('sr-metric').value, limit = $('sr-limit').value;
   const [sum, rank] = await Promise.all([
     get('summary', spotterScope()),
@@ -736,6 +909,7 @@ async function renderSpotters() {
   renderHBars($('sr-chart'), {
     rows: rank.rows.map(r => ({ key: r.key, v: (pick[metric] || pick.count)(r), n: r.count })),
     dim: 'spotter', metricLabel,
+    onPick: (key) => exclude('spotter', key),
   });
   setTableTwin('sr-chart', spotterCols(), rank.rows);
 
@@ -746,7 +920,7 @@ async function renderSpotters() {
 
 function spotterCols() {
   return [
-    { label: 'Spotter', key: true, get: r => r.key },
+    { label: 'Spotter', key: true, exclude: 'spotter', get: r => r.key },
     { label: 'Spots', num: true, get: r => fmtInt(r.count) },
     { label: 'Callsigns', num: true, get: r => fmtInt(r.calls) },
     { label: 'Countries', num: true, get: r => fmtInt(r.countries) },
@@ -819,17 +993,18 @@ async function lookupCallsign() {
     { label: 'Spotter', key: true, get: s => s.spotter || '— (own decoder)' },
     { label: 'Freq kHz', num: true, get: s => (s.freq_hz / 1000).toFixed(1) },
     { label: 'Band', get: s => s.band },
-    { label: 'Mode', get: s => s.mode || s.voice_mode || '' },
+    { label: 'Mode', get: s => spotMode(s) },
     { label: 'SNR', num: true, get: s => fmtNum(s.snr) },
     { label: 'WPM', num: true, get: s => s.wpm || '' },
     { label: 'km', num: true, get: s => s.distance_km ? fmtInt(s.distance_km) : '' },
-    { label: 'Source', get: s => s.stream },
+    { label: 'Source', get: s => streamLabel(s.stream) },
     { label: 'Comment', get: s => s.comment || s.message || '' },
   ], spots.spots));
 }
 
 /* ── Tab: Compare ──────────────────────────────────────────────────────── */
 async function renderCompare() {
+  get('summary').catch(() => {}); // header only; failure is not worth surfacing
   const x = $('cm-x').value, y = $('cm-y').value, metric = $('cm-metric').value;
   const res = await get('matrix', { x, y, metric, limit_y: 30 });
   const metricLabel = $('cm-metric').selectedOptions[0].textContent;
@@ -859,14 +1034,14 @@ async function renderSpots() {
     { label: 'Callsign', key: true, get: s => s.callsign },
     { label: 'Freq kHz', num: true, get: s => (s.freq_hz / 1000).toFixed(1) },
     { label: 'Band', get: s => s.band },
-    { label: 'Mode', get: s => s.mode || s.voice_mode || '' },
+    { label: 'Mode', get: s => spotMode(s) },
     { label: 'SNR', num: true, get: s => fmtNum(s.snr) },
     { label: 'Country', get: s => s.country || '' },
     { label: 'Cont', get: s => s.continent || '' },
     { label: 'Grid', get: s => s.locator || '' },
     { label: 'km', num: true, get: s => s.distance_km ? fmtInt(s.distance_km) : '' },
     { label: 'Spotter', get: s => s.spotter || '' },
-    { label: 'Source', get: s => s.stream },
+    { label: 'Source', get: s => streamLabel(s.stream) },
     { label: 'Comment', get: s => s.comment || s.message || '' },
   ];
   const wrap = $('sp-table');
@@ -940,7 +1115,7 @@ function fillModes(observed) {
 
   let html = '';
   for (const g of (META.mode_groups || [])) {
-    html += `<optgroup label="${escapeHTML(g.label)}">`;
+    html += `<optgroup label="${escapeHTML(g.label)} source">`;
     for (const mode of g.modes) {
       known.add(mode);
       const n = counts.get(mode) || 0;
@@ -990,7 +1165,7 @@ async function init() {
 
   $('f-period').addEventListener('change', async () => {
     $('custom-range').style.display = $('f-period').value === 'custom' ? '' : 'none';
-    await loadFacets();
+    await run(loadFacets, 'filter options');
     refresh();
   });
   $('btn-apply').addEventListener('click', () => { spotOffset = 0; refresh(); });
@@ -1001,10 +1176,12 @@ async function init() {
     ['f-band', 'f-mode', 'f-continent'].forEach(id =>
       Array.from($(id).options).forEach(o => { o.selected = false; }));
     $('f-country').value = '';
-    $('f-period').value = '168';
+    $('f-period').value = '24';
     $('custom-range').style.display = 'none';
+    excluded.spotter.clear(); excluded.callsign.clear();
+    saveExclusions(); renderExclusions();
     spotOffset = 0;
-    loadFacets().then(refresh);
+    run(loadFacets, 'filter options').then(refresh);
   });
   // Enter in any text field applies, matching the Apply button.
   document.querySelectorAll('.filter-body input[type=text], .filter-body input:not([type])').forEach(i =>
@@ -1017,8 +1194,14 @@ async function init() {
    'sr-metric', 'sr-limit', 'cm-x', 'cm-y', 'cm-metric']
     .forEach(id => $(id).addEventListener('change', refresh));
 
-  $('lk-go').addEventListener('click', () => run(lookupCallsign));
-  $('lk-call').addEventListener('keydown', e => { if (e.key === 'Enter') run(lookupCallsign); });
+  $('btn-unexclude-all').addEventListener('click', () => {
+    excluded.spotter.clear(); excluded.callsign.clear();
+    saveExclusions(); renderExclusions(); refresh();
+  });
+
+  const doLookup = () => run(lookupCallsign, `spots of ${$('lk-call').value.trim().toUpperCase() || 'callsign'}`);
+  $('lk-go').addEventListener('click', doLookup);
+  $('lk-call').addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
 
   $('sp-prev').addEventListener('click', () => { spotOffset = Math.max(0, spotOffset - SPOT_PAGE); refresh(); });
   $('sp-next').addEventListener('click', () => { spotOffset += SPOT_PAGE; refresh(); });
@@ -1036,7 +1219,10 @@ async function init() {
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(refresh, 250); });
 
-  await loadFacets();
+  loadExclusions();
+  renderExclusions();
+
+  await run(loadFacets, 'filter options');
   const hash = location.hash.slice(1);
   selectTab(RENDERERS[hash] ? hash : 'overview');
 }

@@ -18,6 +18,13 @@
 
 <div id="tooltip"></div>
 
+<!-- Loading indicator. Fixed below the header so it stays visible however far
+     down the page you are, and announced to screen readers. -->
+<div id="busy" role="status" aria-live="polite" hidden>
+  <span class="spinner" aria-hidden="true"></span>
+  <span id="busy-text">Loading…</span>
+</div>
+
 <header>
   <div class="logo">
     <span class="logo-icon">📊</span>
@@ -46,9 +53,9 @@
       <div class="filter-group">
         <div class="filter-group-label">Period</div>
         <select class="filter-input" id="f-period" style="width:140px">
-          <option value="24">Last 24 hours</option>
+          <option value="24" selected>Last 24 hours</option>
           <option value="72">Last 3 days</option>
-          <option value="168" selected>Last 7 days</option>
+          <option value="168">Last 7 days</option>
           <option value="336">Last 14 days</option>
           <option value="720">Last 30 days</option>
           <option value="custom">Custom range…</option>
@@ -71,6 +78,7 @@
       <div class="filter-group">
         <div class="filter-group-label">Mode</div>
         <select class="filter-input multi" id="f-mode" multiple size="5"></select>
+        <span class="filter-hint">Grouped by the source that<br>produces them. DX cluster spots<br>report no mode.</span>
       </div>
 
       <div class="filter-group">
@@ -143,6 +151,13 @@
         <button class="apply-btn" id="btn-apply">Apply</button>
       </div>
     </div>
+
+    <!-- Excluded stations. Hidden until something is excluded. -->
+    <div class="exclude-bar" id="exclude-bar" hidden>
+      <span class="exclude-label">Excluded</span>
+      <div class="exclude-chips" id="exclude-chips"></div>
+      <button class="mini-btn" id="btn-unexclude-all">Clear exclusions</button>
+    </div>
   </div>
 
   <!-- ── Tabs ── -->
@@ -184,6 +199,12 @@
     </div>
 
     <div class="grid2">
+      <div class="card">
+        <div class="card-hdr"><span class="icon">📡</span> Spots by source
+          <div class="hdr-right"><button class="mini-btn" data-toggle-table="ov-streams">Table</button></div>
+        </div>
+        <div class="chart-host" id="ov-streams"></div>
+      </div>
       <div class="card">
         <div class="card-hdr"><span class="icon">🌍</span> Top countries
           <div class="hdr-right"><button class="mini-btn" data-toggle-table="ov-countries">Table</button></div>
@@ -283,7 +304,7 @@
     <div class="card card-full">
       <div class="card-hdr">
         <span class="icon">📮</span> Who is spotting
-        <span class="filter-note">DX cluster, locally submitted and CW skimmer spots carry a spotter callsign</span>
+        <span class="filter-note">Click any spotter to exclude it — useful for leaving out this receiver's own skimmer</span>
         <div class="hdr-right">
           <label class="mini-label">Rank by</label>
           <select class="mini-select" id="sr-metric">
@@ -304,6 +325,13 @@
 
     <div class="card card-full">
       <div class="card-hdr"><span class="icon">📋</span> Spotter activity</div>
+      <p class="panel-hint">
+        DX cluster, locally submitted and CW skimmer spots carry a spotter callsign;
+        this receiver's own digital and voice decoders do not.
+        <strong>Click a spotter callsign below to exclude it</strong> — it becomes a badge
+        in the Filters bar at the top of the page. Click the <b>×</b> on that badge to put
+        it back. Exclusions apply to every tab and are remembered on this browser.
+      </p>
       <div class="table-wrap" id="sr-table"></div>
     </div>
 

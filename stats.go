@@ -46,6 +46,12 @@ type StatsFilter struct {
 	CallsignExact string
 	SpotterExact  string
 
+	// Exclusions. The receiver's own skimmer callsign submits most of the
+	// spots on its own cluster, so it swamps any ranking unless it can be
+	// taken out.
+	CallsignExclude []string
+	SpotterExclude  []string
+
 	SNRMin, SNRMax   *float64
 	DistMin, DistMax *float64
 	FreqMin, FreqMax *float64 // kHz
@@ -54,10 +60,20 @@ type StatsFilter struct {
 	HourMin, HourMax *int // UTC hour-of-day window, 0–23 inclusive
 }
 
-// modeExpr is the unified mode column. Digital and CW spots carry `mode`;
-// voice spots carry `voice_mode` (USB/LSB) instead, so a single "mode"
-// dimension has to fall through to it.
-const modeExpr = `COALESCE(NULLIF(mode,''), NULLIF(voice_mode,''))`
+// modeExpr is the unified mode column, and it has to reconstruct the mode for
+// two of the four streams:
+//
+//   - digital spots carry it in `mode` (FT8, FT4, …);
+//   - voice spots carry USB/LSB in `voice_mode` and leave `mode` empty;
+//   - CW skimmer spots leave BOTH empty — parseCWSpot never set a mode, because
+//     the stream itself is the mode. The telnet filter has always compensated
+//     in memory (see condMode in filter.go); this does the same in SQL, which
+//     is what makes the thousands of already-stored CW spots findable.
+//
+// parseCWSpot now records "CW" too, so new rows don't rely on this fallback —
+// but historical rows do, and retention runs to a month or more.
+const modeExpr = `COALESCE(NULLIF(mode,''), NULLIF(voice_mode,''),
+	CASE WHEN stream = 'cwskimmer' THEN 'CW' END)`
 
 // hourExpr is the UTC hour of day, 0–23 — the axis behind "best time to work X".
 const hourExpr = `CAST(strftime('%H', ts, 'unixepoch') AS INTEGER)`
@@ -70,7 +86,8 @@ const maxWindowDays = 400
 //
 // The time window accepts either absolute bounds (`from`/`to`, RFC3339 or Unix
 // seconds) or a relative lookback (`days`, or `hours`). It defaults to the last
-// 7 days, which keeps the common case cheap.
+// 24 hours, matching the dashboard's default period and keeping the common case
+// cheap.
 func ParseStatsFilter(q url.Values) (StatsFilter, error) {
 	var f StatsFilter
 	now := time.Now().UTC()
@@ -102,7 +119,7 @@ func ParseStatsFilter(q url.Values) (StatsFilter, error) {
 			}
 			f.From = now.AddDate(0, 0, -n)
 		default:
-			f.From = now.AddDate(0, 0, -7)
+			f.From = now.Add(-24 * time.Hour)
 		}
 	}
 	if f.To.IsZero() {
@@ -139,6 +156,8 @@ func ParseStatsFilter(q url.Values) (StatsFilter, error) {
 	f.Text = strings.TrimSpace(q.Get("q"))
 	f.CallsignExact = strings.ToUpper(strings.TrimSpace(q.Get("callsign_exact")))
 	f.SpotterExact = strings.ToUpper(strings.TrimSpace(q.Get("spotter_exact")))
+	f.CallsignExclude = csvUpper(q, "callsign_exclude")
+	f.SpotterExclude = csvUpper(q, "spotter_exclude")
 
 	for _, spec := range []struct {
 		key string
@@ -235,6 +254,23 @@ func (f StatsFilter) where() (string, []any) {
 		args = append(args, f.SpotterExact)
 	}
 
+	// COALESCE matters here: `col NOT IN (…)` is NULL — and so excludes the
+	// row — when col is NULL, which would silently drop every spot that has
+	// no spotter at all the moment one exclusion is set.
+	notIn := func(col string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		ph := make([]string, len(vals))
+		for i, v := range vals {
+			ph[i] = "?"
+			args = append(args, v)
+		}
+		cl = append(cl, "COALESCE("+col+",'') NOT IN ("+strings.Join(ph, ",")+")")
+	}
+	notIn("callsign", f.CallsignExclude)
+	notIn("spotter", f.SpotterExclude)
+
 	if f.Text != "" {
 		cl = append(cl, `(comment LIKE ? ESCAPE '\' OR message LIKE ? ESCAPE '\')`)
 		pat := "%" + escapeLike(f.Text) + "%"
@@ -307,6 +343,8 @@ func (f StatsFilter) Describe() map[string]any {
 	put("continent", f.Continents)
 	put("country_code", f.CountryCodes)
 	put("country", f.Countries)
+	put("callsign_exclude", f.CallsignExclude)
+	put("spotter_exclude", f.SpotterExclude)
 	if len(f.CQZones) > 0 {
 		m["cq_zone"] = f.CQZones
 	}
@@ -404,6 +442,11 @@ type statsMetric struct {
 	// and false for averages, where an empty bucket has no value at all and
 	// must stay a gap rather than being drawn as a plunge to 0 dB.
 	Zero bool
+	// Summable says values from different series can be added together, which
+	// is what lets the tail beyond the series cap fold into one "Other" line.
+	// Only a plain row count qualifies: distinct counts would double-count a
+	// callsign heard on two bands, and averages cannot be added at all.
+	Summable bool
 }
 
 // Distinct counts wrap the column in NULLIF(…,”): the streams that don't
@@ -411,16 +454,16 @@ type statsMetric struct {
 // as a value of its own. Without this, any window containing digital or voice
 // spots reports one more spotter (and one more country) than it has.
 var statsMetrics = map[string]statsMetric{
-	"count":     {`COUNT(*)`, "Spots", true},
-	"calls":     {`COUNT(DISTINCT NULLIF(callsign,''))`, "Unique callsigns", true},
-	"countries": {`COUNT(DISTINCT NULLIF(country_code,''))`, "Unique countries", true},
-	"spotters":  {`COUNT(DISTINCT NULLIF(spotter,''))`, "Unique spotters", true},
-	"bands":     {`COUNT(DISTINCT NULLIF(band,''))`, "Unique bands", true},
-	"avg_snr":   {`AVG(snr)`, "Average SNR (dB)", false},
-	"max_snr":   {`MAX(snr)`, "Peak SNR (dB)", false},
-	"avg_dist":  {`AVG(distance_km)`, "Average distance (km)", false},
-	"max_dist":  {`MAX(distance_km)`, "Max distance (km)", false},
-	"avg_wpm":   {`AVG(wpm)`, "Average WPM", false},
+	"count":     {`COUNT(*)`, "Spots", true, true},
+	"calls":     {`COUNT(DISTINCT NULLIF(callsign,''))`, "Unique callsigns", true, false},
+	"countries": {`COUNT(DISTINCT NULLIF(country_code,''))`, "Unique countries", true, false},
+	"spotters":  {`COUNT(DISTINCT NULLIF(spotter,''))`, "Unique spotters", true, false},
+	"bands":     {`COUNT(DISTINCT NULLIF(band,''))`, "Unique bands", true, false},
+	"avg_snr":   {`AVG(snr)`, "Average SNR (dB)", false, false},
+	"max_snr":   {`MAX(snr)`, "Peak SNR (dB)", false, false},
+	"avg_dist":  {`AVG(distance_km)`, "Average distance (km)", false, false},
+	"max_dist":  {`MAX(distance_km)`, "Max distance (km)", false, false},
+	"avg_wpm":   {`AVG(wpm)`, "Average WPM", false, false},
 }
 
 // StatsDimsList returns the group-by whitelist for the UI's dimension pickers.
@@ -646,6 +689,11 @@ var bucketSpecs = map[string]struct {
 	"week": {"%Y-%W", "", 0}, // ISO-ish week; label only, no parseable instant
 }
 
+// OtherSeriesName is the label for the folded remainder of a split time series.
+// It is not an entity, so the UI gives it a neutral colour rather than one of
+// the categorical slots.
+const OtherSeriesName = "Other"
+
 // maxFillBuckets caps gap filling. Past this many buckets the axis is too dense
 // to read anyway, and materialising every empty one is pure waste.
 const maxFillBuckets = 2000
@@ -747,10 +795,47 @@ func (s *SpotStore) TimeSeries(f StatsFilter, bucket, metric, splitBy string, ma
 		return names[i] < names[j]
 	})
 	if len(names) > maxSeries {
-		for _, k := range names[maxSeries:] {
-			delete(series, k)
+		// Copy the tail: names[maxSeries:] aliases the same backing array, so
+		// appending "Other" to the truncated names would overwrite dropped[0]
+		// — and the cleanup loop below would then delete the folded series.
+		dropped := append([]string(nil), names[maxSeries:]...)
+		names = names[:maxSeries:maxSeries]
+		// Fold the tail into one "Other" line rather than discarding it: with
+		// ten bands and a seven-slot palette, dropping the quiet three would
+		// make the chart quietly under-report the period's spots. Only a
+		// summable metric can be folded; for the rest the tail is genuinely
+		// not combinable, and the caller is told how many were left out.
+		if m.Summable {
+			agg := map[string]*SeriesPoint{}
+			for _, n := range dropped {
+				for _, p := range series[n] {
+					e, ok := agg[p.Label]
+					if !ok {
+						v := 0.0
+						e = &SeriesPoint{Label: p.Label, TS: p.TS, V: &v}
+						agg[p.Label] = e
+					}
+					if p.V != nil {
+						*e.V += *p.V
+					}
+					e.N += p.N
+				}
+			}
+			labels := make([]string, 0, len(agg))
+			for l := range agg {
+				labels = append(labels, l)
+			}
+			sort.Strings(labels) // bucket labels are ISO-ish, so this is chronological
+			pts := make([]SeriesPoint, 0, len(labels))
+			for _, l := range labels {
+				pts = append(pts, *agg[l])
+			}
+			series[OtherSeriesName] = pts
+			names = append(names, OtherSeriesName)
 		}
-		names = names[:maxSeries]
+		for _, n := range dropped {
+			delete(series, n)
+		}
 	}
 
 	// Fill the gaps. Without this a quiet slice — say FT8 from Germany on 40m —

@@ -54,6 +54,16 @@ var streamOrder = []StreamType{
 	StreamDecoder, StreamCWSkimmer, StreamVoiceActivity, StreamDXCluster, StreamLocalSpot,
 }
 
+// StreamLabelMap returns the stream key → display name map, for UIs that group
+// or label by source.
+func StreamLabelMap() map[string]string {
+	out := make(map[string]string, len(streamOrder))
+	for _, s := range streamOrder {
+		out[string(s)] = StreamLabels[s]
+	}
+	return out
+}
+
 // ModeGroups returns the known modes grouped by the stream that produces them,
 // in a stable order, skipping streams that carry no mode.
 func ModeGroups() []map[string]any {
@@ -364,12 +374,17 @@ func parseCWSpot(data []byte) (*Spot, error) {
 	}
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 	return &Spot{
-		Stream:      StreamCWSkimmer,
-		Timestamp:   ts,
-		Band:        bandForSpot(e.Frequency),
-		Callsign:    e.Callsign,
-		FreqHz:      e.Frequency,
-		SNR:         float64(e.SNR),
+		Stream:    StreamCWSkimmer,
+		Timestamp: ts,
+		Band:      bandForSpot(e.Frequency),
+		Callsign:  e.Callsign,
+		FreqHz:    e.Frequency,
+		SNR:       float64(e.SNR),
+		// The upstream cw_spot event has no mode field — the stream *is* the
+		// mode. Recording it explicitly keeps the stored row self-describing,
+		// so anything reading the mode column (the stats API, an SQL query)
+		// finds CW spots without having to know about stream types.
+		Mode:        "CW",
 		Spotter:     e.Spotter,
 		WPM:         e.WPM,
 		Comment:     e.Comment,

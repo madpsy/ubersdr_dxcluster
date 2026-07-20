@@ -97,7 +97,10 @@ func (w *WebServer) handleStatsMeta(rw http.ResponseWriter, r *http.Request) {
 		// these regardless of whether the current window happens to contain
 		// any, so a filter never hides a mode that simply had a quiet week.
 		"mode_groups": ModeGroups(),
-		"countries":   w.countries,
+		// Display names for the raw stream keys, so charts and tables can show
+		// "Digital" rather than "decoder".
+		"stream_labels": StreamLabelMap(),
+		"countries":     w.countries,
 	})
 }
 
