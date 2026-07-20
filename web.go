@@ -39,7 +39,9 @@ type WebServer struct {
 	rxLocation string
 	telnetAddr string
 	countries  []CountryEntry
+	store      *SpotStore
 	tmpl       *template.Template
+	statsTmpl  *template.Template
 }
 
 // ReceiverInfo holds static data fetched from /api/description at startup.
@@ -51,7 +53,7 @@ type ReceiverInfo struct {
 	Lon      float64
 }
 
-func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {
+func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, store *SpotStore, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {
 	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read index.html: %w", err)
@@ -59,6 +61,14 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 	tmpl, err := template.New("index").Parse(string(tmplData))
 	if err != nil {
 		return nil, fmt.Errorf("parse index.html template: %w", err)
+	}
+	statsData, err := staticFiles.ReadFile("static/stats.html")
+	if err != nil {
+		return nil, fmt.Errorf("read stats.html: %w", err)
+	}
+	statsTmpl, err := template.New("stats").Parse(string(statsData))
+	if err != nil {
+		return nil, fmt.Errorf("parse stats.html template: %w", err)
 	}
 	return &WebServer{
 		addr:       addr,
@@ -70,7 +80,9 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		rxLocation: rx.Location,
 		telnetAddr: telnetAddr,
 		countries:  countries,
+		store:      store,
 		tmpl:       tmpl,
+		statsTmpl:  statsTmpl,
 	}, nil
 }
 
@@ -94,6 +106,11 @@ func (w *WebServer) ListenAndServe() error {
 
 	// Root → index.html rendered with BasePath from X-Forwarded-Prefix
 	mux.HandleFunc("/", w.handleIndex)
+
+	// Statistics UI + its analytics API
+	mux.HandleFunc("/stats", w.handleStatsPage)
+	mux.HandleFunc("/stats/", w.handleStatsPage)
+	w.registerStatsRoutes(mux)
 
 	// SSE relay
 	mux.HandleFunc("/api/events", w.handleEvents)
@@ -134,6 +151,22 @@ func (w *WebServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
 		Name:       w.rxName,
 		Location:   w.rxLocation,
 		TelnetAddr: w.telnetAddr,
+	})
+}
+
+// handleStatsPage renders the statistics dashboard.
+func (w *WebServer) handleStatsPage(rw http.ResponseWriter, r *http.Request) {
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = w.statsTmpl.Execute(rw, struct {
+		BasePath string
+		Callsign string
+		Name     string
+		Location string
+	}{
+		BasePath: basePath(r),
+		Callsign: w.rxCallsign,
+		Name:     w.rxName,
+		Location: w.rxLocation,
 	})
 }
 

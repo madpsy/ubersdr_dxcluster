@@ -498,6 +498,7 @@ function getCheckedModes() {
   const map = {
     'f-mode-ft8':  'FT8',  'f-mode-ft4':  'FT4',
     'f-mode-wspr': 'WSPR', 'f-mode-js8':  'JS8',
+    'f-mode-ft2':  'FT2',
     'f-mode-cw':   'CW',   'f-mode-usb':  'USB',
     'f-mode-lsb':  'LSB',
   };
@@ -614,7 +615,7 @@ function clearAllFilters() {
     if (el) el.checked = def;
   }
   // Reset mode checkboxes
-  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-cw','f-mode-usb','f-mode-lsb'].forEach(id => {
+  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-ft2','f-mode-cw','f-mode-usb','f-mode-lsb'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.checked = true;
   });

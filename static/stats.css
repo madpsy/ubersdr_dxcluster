@@ -1,0 +1,170 @@
+/* stats.css — additions for the statistics dashboard.
+   Layout, chart chrome and the validated chart palette. Everything else is
+   inherited from style.css so the two pages stay visually identical. */
+
+:root {
+  /* Categorical series slots — assigned in this fixed order, never cycled.
+     Validated against the #111827 chart surface (dark mode): lightness band,
+     chroma floor, adjacent CVD separation, normal-vision separation and
+     contrast all pass. Do not reorder: the ordering IS the CVD safety. */
+  --s1: #0395ca;  /* blue   */
+  --s2: #d46507;  /* orange */
+  --s3: #04a178;  /* green  */
+  --s4: #8f72df;  /* purple */
+  --s5: #a88400;  /* gold   */
+  --s6: #0b99b3;  /* cyan   */
+  --s7: #ed3a5f;  /* red    */
+
+  /* Sequential ramp (single hue, light→dark) for heatmap magnitude.
+     The darkest step recedes toward the surface: near-zero reads as "nothing". */
+  --q0: #001c29;
+  --q1: #013b52;
+  --q2: #025474;
+  --q3: #1a6f94;
+  --q4: #318ab4;
+  --q5: #46a7d6;
+  --q6: #5cc4f8;
+  --q7: #a1deff;
+
+  --grid: #1e2d42;   /* hairline gridlines — one shade off the surface */
+}
+
+.stats-page { grid-template-columns: 1fr !important; }
+
+.frow { display: flex; gap: 6px; }
+.filter-input.num { width: 66px; }
+select.filter-input.multi { width: 130px; height: auto; font-family: var(--font); }
+select.filter-input.multi option { padding: 2px 5px; }
+select.filter-input.multi option:checked { background: var(--s1); color: #fff; }
+select.filter-input.multi optgroup {
+  color: var(--muted); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+/* A mode this cluster supports but hasn't heard in the selected period:
+   still selectable, visibly quiet. */
+select.filter-input.multi option.empty { color: var(--dim); }
+
+.filter-actions { justify-content: flex-end; }
+.apply-btn {
+  padding: 5px 18px; border-radius: 5px;
+  background: var(--s1); border: 1px solid var(--s1);
+  color: #fff; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
+}
+.apply-btn:hover { filter: brightness(1.15); }
+
+/* ── Tabs ── */
+.tabbar {
+  display: flex; align-items: center; gap: 4px;
+  border-bottom: 1px solid var(--border); padding: 0 4px;
+}
+.tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--muted); font-family: inherit; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 9px 14px; cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--s6); border-bottom-color: var(--s6); }
+.tab-status { margin-left: auto; font-size: 11px; color: var(--dim); padding-right: 10px; }
+
+.tabpanel { display: flex; flex-direction: column; gap: 12px; }
+.tabpanel[hidden] { display: none; }
+
+/* Charts fade rather than flashing a skeleton while a refetch is in flight. */
+.loading .chart-host, .loading .tiles, .loading .table-wrap { opacity: 0.45; }
+.chart-host, .tiles, .table-wrap { transition: opacity 0.2s; }
+
+.grid2 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+/* ── Stat tiles ── */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.tile-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--muted);
+}
+/* Proportional figures on display-size numbers — tabular-nums only in tables. */
+.tile-value { font-size: 26px; font-weight: 700; line-height: 1.25; color: var(--text); }
+.tile-sub { font-size: 11px; color: var(--dim); }
+
+/* ── The headline answer on the Best Time tab ── */
+.answer-card { border-color: var(--border2); }
+.answer-body { padding: 16px 18px; }
+.answer-hero { font-size: 34px; font-weight: 700; line-height: 1.15; color: var(--text); }
+.answer-hero .unit { font-size: 20px; color: var(--muted); font-weight: 400; }
+.answer-text { font-size: 13px; color: var(--muted); margin-top: 6px; max-width: 76ch; }
+.answer-text strong { color: var(--text); font-weight: 700; }
+
+/* ── Chart chrome ── */
+.chart-host { padding: 12px 14px 6px; min-height: 60px; }
+.chart-host svg { display: block; width: 100%; overflow: visible; }
+.axis-line { stroke: var(--grid); stroke-width: 1; }       /* solid hairline, never dashed */
+.grid-line { stroke: var(--grid); stroke-width: 1; }
+.axis-text { fill: var(--muted); font-size: 10px; font-family: var(--font); }
+.axis-text.tabular { font-variant-numeric: tabular-nums; }
+.axis-title { fill: var(--dim); font-size: 10px; font-family: var(--font); letter-spacing: 0.06em; text-transform: uppercase; }
+.mark-label { fill: var(--text); font-size: 10px; font-weight: 700; font-family: var(--font); }
+.hit { fill: transparent; cursor: pointer; }
+.crosshair { stroke: var(--border2); stroke-width: 1; }
+
+/* ── Callsign lookup ── */
+.lookup-body {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.lookup-input { width: 180px; text-transform: uppercase; font-size: 13px; }
+.lookup-hint { font-size: 11px; color: var(--dim); }
+.lookup-result { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.lookup-hero { font-size: 22px; font-weight: 700; color: var(--text); }
+.lookup-sub { font-size: 12px; color: var(--muted); margin-top: 4px; max-width: 80ch; }
+.lookup-sub strong { color: var(--text); }
+.spotter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.spotter-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 14px; padding: 3px 10px;
+  font-family: var(--mono); font-size: 11px; color: var(--text);
+}
+.spotter-chip b { color: var(--s6); font-weight: 700; }
+
+/* Stand-in for a chart whose data has collapsed to a single value. */
+.solo { padding: 6px 2px 12px; }
+.solo-value { font-size: 30px; font-weight: 700; line-height: 1.2; color: var(--text); }
+.solo-label { font-size: 12px; color: var(--muted); }
+.solo-sub { font-size: 11px; color: var(--dim); margin-top: 4px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 2px 2px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.legend-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+.scale-legend { display: flex; align-items: center; gap: 8px; padding: 10px 2px 2px; font-size: 10px; color: var(--muted); }
+.scale-ramp { display: flex; height: 10px; border-radius: 3px; overflow: hidden; }
+.scale-ramp i { width: 22px; }
+
+.mini-btn, .mini-select {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--muted);
+  font-family: inherit; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 9px; cursor: pointer;
+}
+.mini-select { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); }
+.mini-btn:hover, .mini-select:hover { border-color: var(--s1); color: var(--text); }
+.mini-btn.on { border-color: var(--s6); color: var(--s6); }
+.mini-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Table-view twin of each chart — the WCAG-clean equivalent. */
+.chart-table { padding: 4px 0 8px; overflow-x: auto; }
+.chart-table table { min-width: 0; }
+.chart-table td.num, .data-table td.num, .data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table td, .data-table th { padding: 5px 10px; }
+.data-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.data-table .key-cell { font-family: var(--mono); color: var(--text); }
+
+.pill-mono { font-family: var(--mono); }
+.err { color: var(--red); padding: 14px; font-size: 12px; }

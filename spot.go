@@ -22,6 +22,56 @@ const (
 	StreamLocalSpot StreamType = "localspot"
 )
 
+// StreamModes lists the mode values each upstream stream can produce. It is the
+// single source of truth for "what can this cluster actually spot", used to
+// build the mode pickers in the web UIs — the database only knows what has been
+// heard lately, which is a different question: a mode with no spots in the last
+// week still needs to appear in a filter, greyed out rather than absent.
+//
+// StreamDXCluster is present but empty: upstream cluster spots carry a free-text
+// comment rather than a mode field.
+var StreamModes = map[StreamType][]string{
+	StreamDecoder:       {"FT8", "FT4", "WSPR", "JS8", "FT2"},
+	StreamCWSkimmer:     {"CW"},
+	StreamVoiceActivity: {"USB", "LSB"},
+	StreamDXCluster:     {},
+	StreamLocalSpot:     {},
+}
+
+// StreamLabels are the human-readable names for each stream, matching the pills
+// in the live web UI.
+var StreamLabels = map[StreamType]string{
+	StreamDecoder:       "Digital",
+	StreamCWSkimmer:     "CW",
+	StreamVoiceActivity: "Voice",
+	StreamDXCluster:     "DX cluster",
+	StreamLocalSpot:     "Local spots",
+}
+
+// streamOrder fixes the order streams are presented in, so the mode picker
+// always groups Digital → CW → Voice rather than in map iteration order.
+var streamOrder = []StreamType{
+	StreamDecoder, StreamCWSkimmer, StreamVoiceActivity, StreamDXCluster, StreamLocalSpot,
+}
+
+// ModeGroups returns the known modes grouped by the stream that produces them,
+// in a stable order, skipping streams that carry no mode.
+func ModeGroups() []map[string]any {
+	out := make([]map[string]any, 0, len(streamOrder))
+	for _, s := range streamOrder {
+		modes := StreamModes[s]
+		if len(modes) == 0 {
+			continue
+		}
+		out = append(out, map[string]any{
+			"stream": string(s),
+			"label":  StreamLabels[s],
+			"modes":  modes,
+		})
+	}
+	return out
+}
+
 // Spot is the unified internal representation of any incoming event.
 // Fields are a superset of all three stream types; unused fields are zero.
 type Spot struct {

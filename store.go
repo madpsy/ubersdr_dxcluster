@@ -56,6 +56,17 @@ CREATE INDEX IF NOT EXISTS idx_spots_cont_ts
     ON spots(continent, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_spots_cc_ts
     ON spots(country_code, ts DESC);
+
+-- Analytics access paths (/api/stats/*). The stats queries filter on a time
+-- window and then aggregate by band/mode/country, so the leading ts column
+-- does the range scan and the trailing columns let SQLite group without
+-- touching the table.
+CREATE INDEX IF NOT EXISTS idx_spots_ts_band
+    ON spots(ts, band);
+CREATE INDEX IF NOT EXISTS idx_spots_ts_mode
+    ON spots(ts, mode);
+CREATE INDEX IF NOT EXISTS idx_spots_cc_band_ts
+    ON spots(country_code, band, ts);
 `
 
 const insertSpot = `

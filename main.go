@@ -259,7 +259,7 @@ func main() {
 		Callsign: callsign,
 		Name:     rxName,
 		Location: rxLocation,
-	}, countries, telnet, hub, wsMaxConns, wsMaxConnsPerIP)
+	}, countries, telnet, hub, store, wsMaxConns, wsMaxConnsPerIP)
 	if err != nil {
 		log.Fatalf("web server init: %v", err)
 	}

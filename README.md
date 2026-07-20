@@ -16,6 +16,8 @@ A full-featured DX cluster add-on for [UberSDR](https://ubersdr.org) that turns 
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
 - [Web UI](#web-ui)
+- [Statistics & Analysis](#statistics--analysis)
+  - [Stats API](#stats-api)
 - [Telnet Interface](#telnet-interface)
   - [Connecting with Logging Software](#connecting-with-logging-software)
   - [Command Reference](#command-reference)
@@ -166,6 +168,141 @@ The web UI is served at `http://your-ubersdr-host/addon/dxcluster/` (or directly
 - **Telnet connection info** — the header shows the telnet address so you can quickly configure your logging software
 - **Desktop client download** — a download button serves the correct client binary for your OS, pre-named with this instance's callsign for automatic targeting
 - **Command reference** — a searchable help modal with the full telnet command reference
+- **Statistics dashboard** — a 📊 Stats link in the header opens the analysis pages described below
+
+---
+
+## Statistics & Analysis
+
+The statistics dashboard lives at `/stats` (linked from the header of the main
+web UI). It analyses the spot database — every stream, every field — behind one
+shared filter row, so a question like *"when is the best time to hear Germany on
+40m?"* is a couple of dropdowns rather than a SQL query.
+
+**Filters** (applied to every chart and table on every tab): time period or an
+explicit UTC date range, band, mode, continent, country, source stream, callsign
+prefix, spotter prefix, grid prefix, SNR range, distance range, UTC hour-of-day
+window (which may wrap midnight), and a comment/message substring.
+
+The **mode picker** is built from the cluster's own list of modes
+(`StreamModes` in `spot.go`, served via `/api/stats/meta`), grouped by the
+source that produces them — Digital (FT8, FT4, WSPR, JS8, FT2), CW, and Voice
+(USB, LSB). Spot counts for the selected period are shown beside each mode, and
+a mode with none is still offered, greyed as `(0)`, rather than vanishing from
+the filter because it had a quiet week. Any mode present in the database but not
+in that list — a new upstream decoder, or older history — is collected under
+**Other**, so nothing in the data is unreachable. Band, continent and country
+pickers are the opposite case and are driven purely by what the database holds.
+
+**Tabs:**
+
+- **Overview** — headline totals (spots, unique callsigns, countries, spotters,
+  average SNR, furthest spot), activity over time on a real time axis, and the
+  leading countries, bands, modes and callsigns. The time chart's interval
+  (hourly / daily / weekly, or automatic) and its split (total, or one line per
+  band / mode / source / continent) are both selectable, so *"the last 24 hours
+  of FT8 from Germany on 40m, by hour"* is the period plus three filters.
+- **Best Time** — the propagation question, answered directly: the busiest UTC
+  hour for the current filter stated in words, spot counts by hour, average SNR
+  by hour, and an hour × band heatmap.
+- **Rankings** — group by any dimension, rank by any metric, with the full
+  metric set in a sortable table.
+- **Spotters** — who is submitting spots. DX cluster, locally submitted and CW
+  skimmer spots carry a spotter callsign (this receiver's own digital and voice
+  decoders do not), so this tab scopes itself to those sources: unique spotter
+  count, a leaderboard rankable by spots submitted / unique callsigns / countries
+  / bands, and per-spotter first and last activity. It also answers **"who
+  spotted this callsign?"** — enter a callsign for an exact-match list of every
+  spot of it in the period, with the spotter, time, frequency, band, mode, SNR
+  and comment, plus a per-spotter tally.
+- **Compare** — an arbitrary cross-tab: pick any two dimensions and a metric and
+  read the result as a heatmap (hour × country, band × continent, weekday ×
+  mode, …).
+- **Spots** — the raw rows behind any aggregate, paged, with CSV download.
+
+Every chart has a **Table** button showing the same numbers as text, and all
+times are UTC.
+
+### Stats API
+
+Each tab is powered by `/api/stats/*`. Every endpoint accepts the **same filter
+query string** and echoes the resolved filter back in its response, so a chart
+and its drill-down can be driven from one URL.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/stats/meta` | Available dimensions, metrics, buckets, streams and **mode groups** — the UI builds its pickers from this |
+| `GET /api/stats/facets` | Distinct values actually present under the filter (so a picker never offers a dead end) |
+| `GET /api/stats/summary` | Headline totals for the filter, plus the busiest hour and band |
+| `GET /api/stats/breakdown` | Group by one dimension (`group_by`), ranked by a metric (`sort`, `limit`) |
+| `GET /api/stats/matrix` | Cross-tabulate two dimensions (`x`, `y`, `metric`, `limit_y`) |
+| `GET /api/stats/series` | Time series (`bucket=hour\|day\|week`, `metric`), optionally split into one series per value of `split_by` |
+| | Hourly and daily series are **gap-filled** across the whole window: quiet buckets come back as `0` for counting metrics and `null` for averages, so a chart shows the silence rather than interpolating over it |
+| `GET /api/stats/spots` | The raw filtered spots (`limit`, `offset`), newest first |
+
+**Filter parameters** (shared by all of the above):
+
+| Parameter | Meaning |
+|-----------|---------|
+| `days` / `hours` | Relative lookback; defaults to the last 7 days |
+| `from` / `to` | Absolute bounds — RFC3339, `YYYY-MM-DD`, or Unix seconds |
+| `band`, `mode`, `stream`, `continent`, `country_code`, `country`, `cq_zone` | Multi-value (repeat the parameter or comma-separate); values OR within a parameter and AND across parameters |
+| `callsign`, `spotter`, `locator` | Prefix match (a trailing `*` is accepted and ignored) |
+| `callsign_exact`, `spotter_exact` | Exact match — use these to look a station up rather than browse a prefix, so `G3ABC` does not also return `G3ABCD` |
+| `q` | Substring of the spot comment or message |
+| `snr_min` / `snr_max` | SNR bounds in dB |
+| `dist_min` / `dist_max` | Distance bounds in km |
+| `freq_min` / `freq_max` | Frequency bounds in kHz |
+| `wpm_min` / `wpm_max` | CW speed bounds |
+| `conf_min` | Minimum voice-detection confidence |
+| `hour_min` / `hour_max` | UTC hour-of-day window, 0–23; wraps midnight when `hour_min > hour_max` |
+
+**Dimensions** (`group_by`, `x`, `y`, `split_by`): `hour`, `weekday`, `date`,
+`month`, `band`, `mode`, `stream`, `callsign`, `spotter`, `country`, `cc`,
+`continent`, `cq_zone`, `locator`, `field`, `wpm`, `voice_mode`, `snr_bucket`,
+`dist_bucket`, `freq_bucket`.
+
+**Metrics** (`metric`, `sort`): `count`, `calls`, `countries`, `spotters`,
+`bands`, `avg_snr`, `max_snr`, `avg_dist`, `max_dist`, `avg_wpm`.
+
+Distinct counts (`calls`, `countries`, `spotters`, `bands`) ignore empty values,
+so spots from streams that don't populate a field — digital and voice spots have
+no spotter — don't inflate the total.
+
+Anything outside those whitelists is rejected with a `400` — only whitelisted
+identifiers ever reach the SQL, and every filter value is bound as a parameter.
+
+**Example** — the busiest UTC hours for Germany on 40m over the last 30 days:
+
+```
+GET /api/stats/breakdown?days=30&band=40m&country_code=DE&group_by=hour&sort=count
+```
+
+**Example** — an hour × band heatmap of average SNR for European CW spots:
+
+```
+GET /api/stats/matrix?days=14&continent=EU&mode=CW&x=hour&y=band&metric=avg_snr
+```
+
+**Example** — the last 24 hours of FT8 spots from Germany on 40m, bucketed by
+hour (one point per hour, zeroes included):
+
+```
+GET /api/stats/series?hours=24&band=40m&mode=FT8&country_code=DE&bucket=hour
+```
+
+**Example** — the spotter leaderboard for the last week, busiest first:
+
+```
+GET /api/stats/breakdown?days=7&stream=dxcluster,localspot,cwskimmer&group_by=spotter&sort=count
+```
+
+**Example** — who spotted G3ABC, and every spot of it with frequency and time:
+
+```
+GET /api/stats/breakdown?days=30&callsign_exact=G3ABC&group_by=spotter&sort=count
+GET /api/stats/spots?days=30&callsign_exact=G3ABC
+```
 
 ---
 
@@ -389,6 +526,8 @@ The web server exposes the following HTTP endpoints (all accessible through the 
 | `GET /api/status` | JSON status: uptime, telnet client count and list, available streams |
 | `GET /api/help` | Plain-text telnet command reference |
 | `GET /api/countries` | JSON list of DXCC countries (for the web UI country filter) |
+| `GET /stats` | Statistics dashboard (HTML) |
+| `GET /api/stats/*` | Analytics API — see [Stats API](#stats-api) |
 | `GET /clients/dxcluster` | Desktop client binary (Linux) |
 | `GET /clients/dxcluster.exe` | Desktop client binary (Windows) |
 | `GET /client/download` | OS-detected client download, named after the instance callsign |

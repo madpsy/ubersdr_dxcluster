@@ -76,6 +76,8 @@
   <div class="conn-pill disconnected" id="conn-dx">
     <span>DX</span>
   </div>
+  <a class="conn-pill hdr-download" href="{{.BasePath}}/stats"
+     title="Spot statistics and propagation analysis">📊 Stats</a>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/client/download"
      onclick="showClientInfo()"
      title="Download the desktop DX Cluster client for your operating system">⬇️ Client</a>
@@ -139,6 +141,7 @@
           <label class="fcheck"><input type="checkbox" id="f-mode-ft4"  checked onchange="applyFilters()"><span>FT4</span></label>
           <label class="fcheck"><input type="checkbox" id="f-mode-wspr" checked onchange="applyFilters()"><span>WSPR</span></label>
           <label class="fcheck"><input type="checkbox" id="f-mode-js8"  checked onchange="applyFilters()"><span>JS8</span></label>
+          <label class="fcheck"><input type="checkbox" id="f-mode-ft2"  checked onchange="applyFilters()"><span>FT2</span></label>
           <label class="fcheck"><input type="checkbox" id="f-mode-cw"   checked onchange="applyFilters()"><span>CW</span></label>
           <label class="fcheck"><input type="checkbox" id="f-mode-usb"  checked onchange="applyFilters()"><span>USB</span></label>
           <label class="fcheck"><input type="checkbox" id="f-mode-lsb"  checked onchange="applyFilters()"><span>LSB</span></label>
