@@ -37,6 +37,8 @@ type WebServer struct {
 	rxCallsign string
 	rxName     string
 	rxLocation string
+	rxTimezone string
+	rxTZOffset int
 	telnetAddr string
 	countries  []CountryEntry
 	store      *SpotStore
@@ -51,6 +53,11 @@ type ReceiverInfo struct {
 	Location string
 	Lat      float64
 	Lon      float64
+	// Timezone is the receiver's IANA zone name, used by the stats page to
+	// offer "instance time" alongside UTC and the viewer's own local time.
+	// TimezoneOffset (minutes) is only a fallback for when the name is absent.
+	Timezone       string
+	TimezoneOffset int
 }
 
 func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, store *SpotStore, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {
@@ -78,6 +85,8 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		rxCallsign: rx.Callsign,
 		rxName:     rx.Name,
 		rxLocation: rx.Location,
+		rxTimezone: rx.Timezone,
+		rxTZOffset: rx.TimezoneOffset,
 		telnetAddr: telnetAddr,
 		countries:  countries,
 		store:      store,
@@ -162,11 +171,15 @@ func (w *WebServer) handleStatsPage(rw http.ResponseWriter, r *http.Request) {
 		Callsign string
 		Name     string
 		Location string
+		Timezone string
+		TZOffset int
 	}{
 		BasePath: basePath(r),
 		Callsign: w.rxCallsign,
 		Name:     w.rxName,
 		Location: w.rxLocation,
+		Timezone: w.rxTimezone,
+		TZOffset: w.rxTZOffset,
 	})
 }
 

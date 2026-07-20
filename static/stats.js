@@ -55,18 +55,98 @@ function rampColor(t) {
   return cssVar(RAMP[i]);
 }
 
+/* ── Time zone ─────────────────────────────────────────────────────────────
+ * Every timestamp the API returns is UTC. Which zone they are *displayed* in is
+ * purely a browser-side choice between three: UTC, the receiver's own zone, and
+ * the viewer's. The receiver's zone comes from /api/description as an IANA name
+ * ("Europe/London"), which is what makes this correct across a DST change — the
+ * `timezone_offset` field alongside it is only today's offset, so a spot from
+ * the other side of a transition would be an hour out.
+ */
+const TZ_KEY = 'dxstats.tz.v1';
+const RX_TZ = (window.RX_TZ || '').trim();
+const RX_TZ_OFFSET = Number(window.RX_TZ_OFFSET) || 0;
+
+// A named zone is preferred; a whole-hour offset is the fallback when the
+// instance reports no name (Etc/GMT signs are inverted, hence the flip).
+// An absent name AND a zero offset means "not reported" — not UTC+0 — so the
+// Instance option is withheld rather than quietly duplicating UTC.
+const INSTANCE_ZONE = RX_TZ ||
+  (RX_TZ_OFFSET !== 0 && RX_TZ_OFFSET % 60 === 0
+    ? `Etc/GMT${RX_TZ_OFFSET > 0 ? '-' : '+'}${Math.abs(RX_TZ_OFFSET / 60)}`
+    : '');
+
+let tzMode = 'utc';
+
+// zoneFor maps the mode to an Intl timeZone: undefined means the viewer's own.
+function zoneFor(mode) {
+  if (mode === 'utc') return 'UTC';
+  if (mode === 'instance') return INSTANCE_ZONE || 'UTC';
+  return undefined;
+}
+
+// tzAbbrev is the short zone name for the current mode ("UTC", "BST", "CEST"),
+// so a displayed time always says which clock it is on.
+function tzAbbrev(mode = tzMode, at = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zoneFor(mode), timeZoneName: 'short',
+    }).formatToParts(at);
+    return (parts.find(p => p.type === 'timeZoneName') || {}).value || '';
+  } catch (e) { return ''; }
+}
+
+// tzOffsetMinutes is the offset in effect at a given instant, used to rotate
+// the hour-of-day axis (which the server buckets in UTC).
+function tzOffsetMinutes(at = new Date(), mode = tzMode) {
+  if (mode === 'utc') return 0;
+  if (mode === 'local') return -at.getTimezoneOffset();
+  try {
+    const f = new Intl.DateTimeFormat('en-US', {
+      timeZone: zoneFor('instance'), hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const p = Object.fromEntries(f.formatToParts(at).map(x => [x.type, x.value]));
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+    return Math.round((asUTC - at.getTime()) / 60000);
+  } catch (e) { return 0; }
+}
+
+// fmtInZone renders an instant in the selected zone.
+function fmtInZone(d, opts) {
+  try {
+    return new Intl.DateTimeFormat('en-GB',
+      Object.assign({ timeZone: zoneFor(tzMode), hour12: false }, opts)).format(d);
+  } catch (e) {
+    return new Intl.DateTimeFormat('en-GB', Object.assign({ hour12: false }, opts)).format(d);
+  }
+}
+
+const DATE_TIME = { year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit' };
+
 /* ── Formatting ────────────────────────────────────────────────────────── */
 const nf = new Intl.NumberFormat();
 const fmtInt = (n) => (n === null || n === undefined) ? '—' : nf.format(Math.round(n));
 const fmtNum = (n) => (n === null || n === undefined) ? '—' : nf.format(n);
 const fmtHour = (h) => String(h).padStart(2, '0') + ':00';
+
+// shiftHour moves a UTC hour-of-day bucket into the displayed zone. The server
+// groups by UTC hour, so this rotates the axis rather than re-querying. The
+// offset is the one in effect now: across a DST change inside a long window the
+// two halves differ by an hour, which no single rotation can express.
+function shiftHour(utcHour) {
+  const off = Math.round(tzOffsetMinutes() / 60);
+  return ((+utcHour + off) % 24 + 24) % 24;
+}
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // keyLabel renders a raw group key for the dimension it came from.
 function keyLabel(dim, key) {
   if (key === '' || key === null || key === undefined) return '—';
   if (dim === 'stream') return streamLabel(key);
-  if (dim === 'hour') return fmtHour(key);
+  if (dim === 'hour') return fmtHour(shiftHour(key));
   if (dim === 'weekday') return WEEKDAYS[+key] || key;
   if (dim === 'snr_bucket') return `${key} to ${+key + 5} dB`;
   if (dim === 'dist_bucket') return `${fmtInt(+key)}–${fmtInt(+key + 500)} km`;
@@ -98,7 +178,26 @@ function streamLabel(key) {
 
 function fmtTS(sec) {
   if (!sec) return '—';
-  return new Date(sec * 1000).toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+  const d = new Date(sec * 1000);
+  return fmtInZone(d, DATE_TIME).replace(',', '') + ' ' + tzAbbrev(tzMode, d);
+}
+
+// fmtSpotTime renders a spot's RFC3339 timestamp to the second.
+// bucketZone names the clock a time-series axis is on. Hourly buckets are real
+// instants and follow the chosen zone; daily and weekly buckets are UTC
+// calendar days grouped in SQL, and relabelling them would be a lie — a "day"
+// is not the same day once you move zones.
+function bucketZone(bucket) {
+  return bucket === 'hour' ? (tzAbbrev() || 'UTC') : 'UTC';
+}
+
+// Column headings carry the zone, so an exported CSV is unambiguous too.
+function timeColLabel() { return `Time (${tzAbbrev() || 'UTC'})`; }
+function hourColLabel() { return `Hour (${tzAbbrev() || 'UTC'})`; }
+
+function fmtSpotTime(iso) {
+  const d = new Date(iso);
+  return fmtInZone(d, Object.assign({ second: '2-digit' }, DATE_TIME)).replace(',', '');
 }
 
 /* ── Tooltip ───────────────────────────────────────────────────────────── */
@@ -584,10 +683,19 @@ function filterQS(extra) {
     ['callsign', 'f-callsign'], ['spotter', 'f-spotter'], ['locator', 'f-locator'],
     ['q', 'f-text'], ['snr_min', 'f-snr-min'], ['snr_max', 'f-snr-max'],
     ['dist_min', 'f-dist-min'], ['dist_max', 'f-dist-max'],
-    ['hour_min', 'f-hour-min'], ['hour_max', 'f-hour-max'],
   ]) {
     const v = $(id).value.trim();
     if (v !== '') p.set(key, v);
+  }
+
+  // The hour-of-day box is read in whatever zone is on display, but the server
+  // only groups by UTC hour — so shift back before sending, or the filter and
+  // the axis would disagree.
+  for (const [key, id] of [['hour_min', 'f-hour-min'], ['hour_max', 'f-hour-max']]) {
+    const v = $(id).value.trim();
+    if (v === '') continue;
+    const off = Math.round(tzOffsetMinutes() / 60);
+    p.set(key, String(((+v - off) % 24 + 24) % 24));
   }
   if (excluded.spotter.size) p.set('spotter_exclude', [...excluded.spotter].join(','));
   if (excluded.callsign.size) p.set('callsign_exclude', [...excluded.callsign].join(','));
@@ -649,7 +757,8 @@ async function get(path, extra) {
 // carry their own narrower filter, so only unscoped responses count.
 function updateHeader(body) {
   if (body.filter && body.filter.from && body.filter.to) {
-    $('hdr-window').textContent = body.filter.from.slice(0, 10) + ' → ' + body.filter.to.slice(0, 10);
+    const d = (iso) => fmtInZone(new Date(iso), { year: 'numeric', month: '2-digit', day: '2-digit' });
+    $('hdr-window').textContent = d(body.filter.from) + ' → ' + d(body.filter.to);
   }
   if (!body.filter) return;
   // A lookup narrows to one station, and the Spotters tab implicitly narrows to
@@ -715,12 +824,12 @@ async function renderOverview() {
   xLabels.sort();
   renderLines($('ov-series'), {
     series: ser.series, names: ser.names, xLabels,
-    metricLabel: `Spots per ${bucket} (UTC)`,
+    metricLabel: `Spots per ${bucket} (${bucketZone(bucket)})`,
     tickLabel: (l, i, prev) => bucketLabel(bucket, l, prev),
     seriesLabel: (n) => n === OTHER_SERIES ? n : keyLabel(split, n),
   });
   setTableTwin('ov-series', [
-    { label: bucket === 'hour' ? 'Hour (UTC)' : 'Date', get: r => r.label },
+    { label: bucket === 'hour' ? `Hour (${bucketZone(bucket)})` : 'Date (UTC)', get: r => r.label },
     ...ser.names.map(n => ({
       label: n === OTHER_SERIES ? n : keyLabel(split, n), num: true, get: r => fmtNum(r[n]),
     })),
@@ -787,10 +896,10 @@ async function renderBestTime() {
   renderLines($('bt-snr'), {
     series: { 'Average SNR': snrPts }, names: ['Average SNR'],
     xLabels: snrPts.map(p => p.label),
-    metricLabel: 'Average SNR, dB (UTC hour)', zeroBaseline: false,
+    metricLabel: `Average SNR, dB (hour, ${tzAbbrev() || 'UTC'})`, zeroBaseline: false,
   });
   setTableTwin('bt-snr', [
-    { label: 'UTC hour', get: r => fmtHour(r.key) },
+    { label: hourColLabel(), get: r => fmtHour(shiftHour(r.key)) },
     { label: 'Average SNR (dB)', num: true, get: r => fmtNum(r.avg_snr) },
     { label: 'Peak SNR (dB)', num: true, get: r => fmtNum(r.max_snr) },
     { label: 'Spots', num: true, get: r => fmtInt(r.count) },
@@ -803,7 +912,7 @@ async function renderBestTime() {
   });
   setTableTwin('bt-heat', [
     { label: 'Band', get: c => c.y },
-    { label: 'UTC hour', get: c => fmtHour(c.x) },
+    { label: hourColLabel(), get: c => fmtHour(shiftHour(c.x)) },
     { label: metricLabel, num: true, get: c => fmtNum(c.v) },
     { label: 'Spots', num: true, get: c => fmtInt(c.n) },
   ], heat.cells.slice().sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)), 'hour-by-band');
@@ -828,11 +937,13 @@ function renderAnswer(byHour, heat) {
 
   const scope = describeScope();
   host.innerHTML =
-    `<div class="answer-hero">${fmtHour(best.key)}<span class="unit"> UTC</span></div>` +
+    `<div class="answer-hero">${fmtHour(shiftHour(best.key))}` +
+    `<span class="unit"> ${escapeHTML(tzAbbrev() || 'UTC')}</span></div>` +
     `<div class="answer-text">Busiest hour ${escapeHTML(scope)}: <strong>${fmtInt(best.count)} spots</strong> ` +
     `(${share}% of the period's total)` +
     (best.avg_snr !== null ? `, averaging <strong>${fmtNum(best.avg_snr)} dB</strong> SNR` : '') +
-    (bestCell ? `. The strongest hour-and-band combination is <strong>${escapeHTML(bestCell.y)} at ${fmtHour(bestCell.x)} UTC</strong>.` : '.') +
+    (bestCell ? `. The strongest hour-and-band combination is <strong>${escapeHTML(bestCell.y)} at ` +
+      `${fmtHour(shiftHour(bestCell.x))} ${escapeHTML(tzAbbrev() || 'UTC')}</strong>.` : '.') +
     `</div>`;
 }
 
@@ -1002,7 +1113,7 @@ async function lookupCallsign() {
     `</div>`;
 
   renderDataTable('lk-table', [
-    { label: 'Time (UTC)', get: s => s.timestamp.replace('T', ' ').slice(0, 19) },
+    { label: timeColLabel(), get: s => fmtSpotTime(s.timestamp) },
     { label: 'Spotter', key: true, get: s => s.spotter || '— (own decoder)' },
     { label: 'Freq kHz', num: true, get: s => (s.freq_hz / 1000).toFixed(1) },
     { label: 'Band', get: s => s.band },
@@ -1043,7 +1154,7 @@ async function renderSpots() {
   $('sp-next').disabled = spotOffset + SPOT_PAGE >= res.total;
 
   const cols = [
-    { label: 'Time (UTC)', get: s => s.timestamp.replace('T', ' ').slice(0, 19) },
+    { label: timeColLabel(), get: s => fmtSpotTime(s.timestamp) },
     { label: 'Callsign', key: true, get: s => s.callsign },
     { label: 'Freq kHz', num: true, get: s => (s.freq_hz / 1000).toFixed(1) },
     { label: 'Band', get: s => s.band },
@@ -1098,6 +1209,42 @@ document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-csv]');
   if (btn) downloadCSV(btn.dataset.csv);
 });
+
+/* ── Timezone switch ───────────────────────────────────────────────────── */
+
+// applyTZ re-labels everything zone-dependent and re-renders. No refetch is
+// needed for the absolute timestamps — the API already returned UTC instants,
+// and the choice is purely how they are displayed.
+function applyTZ(mode, { rerender = true } = {}) {
+  tzMode = mode;
+  try { localStorage.setItem(TZ_KEY, mode); } catch (e) { /* private mode */ }
+
+  document.querySelectorAll('.tz-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tz === mode));
+  const abbrev = tzAbbrev() || 'UTC';
+  document.querySelectorAll('.tz-name').forEach(e => { e.textContent = abbrev; });
+
+  const inst = $('tz-instance');
+  inst.title = INSTANCE_ZONE
+    ? `Receiver time — ${INSTANCE_ZONE}`
+    : 'This instance does not report a timezone';
+  if (rerender) refresh();
+}
+
+function initTZ() {
+  // Without a zone from /api/description there is no meaningful "instance"
+  // time, so the option is disabled rather than quietly showing UTC.
+  if (!INSTANCE_ZONE) {
+    $('tz-instance').disabled = true;
+  }
+  let saved = 'utc';
+  try { saved = localStorage.getItem(TZ_KEY) || 'utc'; } catch (e) { /* ignore */ }
+  if (saved === 'instance' && !INSTANCE_ZONE) saved = 'utc';
+
+  document.querySelectorAll('.tz-btn').forEach(b =>
+    b.addEventListener('click', () => { if (!b.disabled) applyTZ(b.dataset.tz); }));
+  applyTZ(saved, { rerender: false });
+}
 
 /* ── Tab wiring ────────────────────────────────────────────────────────── */
 const RENDERERS = {
@@ -1252,6 +1399,7 @@ async function init() {
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(refresh, 250); });
 
+  initTZ();
   loadExclusions();
   renderExclusions();
 

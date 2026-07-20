@@ -239,6 +239,31 @@ pickers are the opposite case and are driven purely by what the database holds.
   mode, …).
 - **Spots** — the raw rows behind any aggregate, paged, with CSV download.
 
+### Time zones
+
+The header carries a **UTC / Instance / Local** switch that changes how every
+time on the page is displayed. It is purely browser-side — the API always
+returns UTC instants — and the choice is remembered per browser.
+
+*Instance* uses the receiver's own zone, taken from the `receiver.timezone` IANA
+name in `/api/description` (`Europe/London`). The name matters: the
+`timezone_offset` field alongside it is only the offset in effect today, so a
+spot from the other side of a daylight-saving change would be an hour out.
+Instances that report no zone get the option disabled rather than a silent
+duplicate of UTC.
+
+Two things follow the switch that are worth knowing about:
+
+- The **hour-of-day** axis (Best Time, and the `hour` dimension anywhere) is
+  grouped in UTC by SQL and rotated client-side, so it reads in the selected
+  zone. Across a daylight-saving change inside a long window the two halves
+  differ by an hour, which a single rotation cannot express.
+- The **hour-of-day filter** is read in the selected zone and converted to UTC
+  before querying, so the filter and the axis always agree.
+
+**Daily and weekly buckets stay UTC** and are labelled as such — they are
+calendar days grouped in SQL, and a day is not the same day in another zone.
+
 Every chart has a **Table** button showing the same numbers as text, and every
 table — chart table-views included — has a **⬇ CSV** button. Exports carry the
 underlying values rather than the displayed ones (no thousands separators, empty

@@ -9,6 +9,8 @@
     window.RX_CALLSIGN = "{{.Callsign}}";
     window.RX_NAME     = "{{.Name}}";
     window.RX_LOCATION = "{{.Location}}";
+    window.RX_TZ       = "{{.Timezone}}";   // IANA name, e.g. Europe/London
+    window.RX_TZ_OFFSET= {{.TZOffset}};     // minutes; fallback if no name
   </script>
   <link rel="stylesheet" href="{{.BasePath}}/static/fonts/fonts.css">
   <link rel="stylesheet" href="{{.BasePath}}/static/style.css">
@@ -35,6 +37,12 @@
     <span class="rx-loc" id="rx-loc"></span>
   </div>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/" title="Back to the live spot view">← Live spots</a>
+  <div class="tz-switch" id="tz-switch" role="group" aria-label="Display times in">
+    <span class="tz-label">Times</span>
+    <button class="tz-btn" data-tz="utc">UTC</button>
+    <button class="tz-btn" data-tz="instance" id="tz-instance">Instance</button>
+    <button class="tz-btn" data-tz="local">Local</button>
+  </div>
   <div class="stat-pill"><span class="lbl">Window</span><span class="val" id="hdr-window">—</span></div>
   <div class="stat-pill"><span class="lbl">Spots</span><span class="val" id="hdr-spots">—</span></div>
 </header>
@@ -134,7 +142,7 @@
       </div>
 
       <div class="filter-group">
-        <div class="filter-group-label">UTC hour (from / to)</div>
+        <div class="filter-group-label"><span class="tz-name">UTC</span> hour (from / to)</div>
         <div class="frow">
           <input class="filter-input num" id="f-hour-min" type="number" min="0" max="23" placeholder="0">
           <input class="filter-input num" id="f-hour-max" type="number" min="0" max="23" placeholder="23">
@@ -241,7 +249,7 @@
 
     <div class="card card-full">
       <div class="card-hdr">
-        <span class="icon">📊</span> Spots by UTC hour
+        <span class="icon">📊</span> Spots by hour (<span class="tz-name">UTC</span>)
         <div class="hdr-right"><button class="mini-btn" data-toggle-table="bt-hours">Table</button></div>
       </div>
       <div class="chart-host" id="bt-hours"></div>
@@ -249,7 +257,7 @@
 
     <div class="card card-full">
       <div class="card-hdr">
-        <span class="icon">📶</span> Average SNR by UTC hour
+        <span class="icon">📶</span> Average SNR by hour (<span class="tz-name">UTC</span>)
         <span class="filter-note">Signal strength, plotted separately — never share an axis with spot counts</span>
         <div class="hdr-right"><button class="mini-btn" data-toggle-table="bt-snr">Table</button></div>
       </div>

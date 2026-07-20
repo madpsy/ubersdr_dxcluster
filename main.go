@@ -25,6 +25,11 @@ type descriptionResponse struct {
 			Lat float64 `json:"lat"`
 			Lon float64 `json:"lon"`
 		} `json:"gps"`
+		// Timezone is an IANA name ("Europe/London"); TimezoneOffset is the
+		// offset in minutes as it stands right now. The name is preferred —
+		// a fixed offset would be wrong for spots either side of a DST change.
+		Timezone       string `json:"timezone"`
+		TimezoneOffset int    `json:"timezone_offset"`
 	} `json:"receiver"`
 }
 
@@ -75,10 +80,9 @@ func fetchCountries(baseURL string) []CountryEntry {
 // fetchDescription calls /api/description on the UberSDR instance and returns
 // the receiver callsign, name, location, and GPS coordinates.
 // Falls back to defaults on error.
-func fetchDescription(baseURL string) (callsign, name, location string, lat, lon float64) {
-	callsign = "UBERSDR"
-	name = "UberSDR DX Cluster"
-	location = ""
+func fetchDescription(baseURL string) (rx ReceiverInfo) {
+	rx.Callsign = "UBERSDR"
+	rx.Name = "UberSDR DX Cluster"
 
 	url := strings.TrimRight(baseURL, "/") + "/api/description"
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -96,14 +100,16 @@ func fetchDescription(baseURL string) (callsign, name, location string, lat, lon
 	}
 
 	if d.Receiver.Callsign != "" {
-		callsign = d.Receiver.Callsign
+		rx.Callsign = d.Receiver.Callsign
 	}
 	if d.Receiver.Name != "" {
-		name = d.Receiver.Name
+		rx.Name = d.Receiver.Name
 	}
-	location = d.Receiver.Location
-	lat = d.Receiver.GPS.Lat
-	lon = d.Receiver.GPS.Lon
+	rx.Location = d.Receiver.Location
+	rx.Lat = d.Receiver.GPS.Lat
+	rx.Lon = d.Receiver.GPS.Lon
+	rx.Timezone = d.Receiver.Timezone
+	rx.TimezoneOffset = d.Receiver.TimezoneOffset
 	return
 }
 
@@ -214,17 +220,23 @@ func main() {
 	log.Printf("  store    : %s (%d spots, %d-day retention)", dbPath, store.Count(), retain)
 
 	// Fetch receiver info from UberSDR
-	callsign, rxName, rxLocation, rxLat, rxLon := fetchDescription(*ubersdrURL)
+	rx := fetchDescription(*ubersdrURL)
 	if *spotterCall != "" {
-		callsign = *spotterCall
+		rx.Callsign = *spotterCall
 	}
+	callsign := rx.Callsign
 
 	log.Printf("starting ubersdr_dxcluster")
 	log.Printf("  upstream : %s", *ubersdrURL)
 	log.Printf("  web      : %s", *webListen)
 	log.Printf("  telnet   : %s", *telnetListen)
 	log.Printf("  spotter  : %s", callsign)
-	log.Printf("  receiver : %s — %s (%.4f, %.4f)", rxName, rxLocation, rxLat, rxLon)
+	log.Printf("  receiver : %s — %s (%.4f, %.4f)", rx.Name, rx.Location, rx.Lat, rx.Lon)
+	if rx.Timezone != "" {
+		log.Printf("  timezone : %s (UTC%+d min)", rx.Timezone, rx.TimezoneOffset)
+	} else {
+		log.Printf("  timezone : not reported — stats page will offer UTC and local only")
+	}
 
 	hub := NewHub(store)
 	go hub.Run()
@@ -236,13 +248,8 @@ func main() {
 	StartConsumers(ctx, *ubersdrURL, hub)
 
 	// Start telnet DX cluster server
-	telnet := NewTelnetServer(*telnetListen, hub, store, callsign, ReceiverInfo{
-		Callsign: callsign,
-		Name:     rxName,
-		Location: rxLocation,
-		Lat:      rxLat,
-		Lon:      rxLon,
-	}, *ubersdrURL, *requireLogin, spotPassword)
+	telnet := NewTelnetServer(*telnetListen, hub, store, callsign, rx,
+		*ubersdrURL, *requireLogin, spotPassword)
 	go func() {
 		if err := telnet.ListenAndServe(); err != nil {
 			log.Fatalf("telnet server: %v", err)
@@ -255,11 +262,8 @@ func main() {
 	log.Printf("  ws limits: max %d global, %d per-IP", wsMaxConns, wsMaxConnsPerIP)
 
 	// Start web server
-	web, err := NewWebServer(*webListen, *telnetListen, ReceiverInfo{
-		Callsign: callsign,
-		Name:     rxName,
-		Location: rxLocation,
-	}, countries, telnet, hub, store, wsMaxConns, wsMaxConnsPerIP)
+	web, err := NewWebServer(*webListen, *telnetListen, rx,
+		countries, telnet, hub, store, wsMaxConns, wsMaxConnsPerIP)
 	if err != nil {
 		log.Fatalf("web server init: %v", err)
 	}
