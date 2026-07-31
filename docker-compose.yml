@@ -8,8 +8,10 @@ services:
       # UberSDR base HTTP URL (SSE streams are fetched over HTTP, not WebSocket)
       UBERSDR_URL: "http://ubersdr:8080"
       #
-      # Callsign shown as spotter in telnet DX cluster spots (default: UBERSDR)
-      # SPOTTER_CALL: "UBERSDR"
+      # Callsign shown as spotter in telnet DX cluster spots.
+      # Leave unset to use the receiver callsign from /api/description —
+      # startup blocks and retries every 5s until that fetch succeeds.
+      # SPOTTER_CALL: "M9PSY"
       #
       # Web UI port (default: 6087)
       # WEB_PORT: "6087"

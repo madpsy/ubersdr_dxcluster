@@ -6,7 +6,8 @@
 #   WEB_PORT        Port for the web UI server (default: 6087)
 #   TELNET_PORT     Port for the DX cluster telnet server (default: 7300)
 #   SPOTTER_CALL    Callsign shown as spotter for digital/voice spots
-#                   (default: fetched from /api/description at startup)
+#                   (default: fetched from /api/description at startup —
+#                   startup waits, retrying every 5s, until that succeeds)
 #   REQUIRE_LOGIN   Require a valid callsign on telnet connect (default: true)
 #                   Set to "false" or "0" to allow anonymous connections
 #

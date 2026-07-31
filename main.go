@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -77,47 +78,78 @@ func fetchCountries(baseURL string) []CountryEntry {
 	return out
 }
 
+// descriptionRetryDelay is how long to wait between /api/description attempts
+// while the UberSDR instance is unreachable.
+const descriptionRetryDelay = 5 * time.Second
+
 // fetchDescription calls /api/description on the UberSDR instance and returns
 // the receiver callsign, name, location, and GPS coordinates.
-// Falls back to defaults on error.
-func fetchDescription(baseURL string) (rx ReceiverInfo) {
-	rx.Callsign = "UBERSDR"
-	rx.Name = "UberSDR DX Cluster"
+//
+// The receiver callsign is the spotter shown on every spot line, so a partial
+// or defaulted result is not acceptable — an error (or a response without a
+// callsign) is reported to the caller rather than papered over.
+func fetchDescription(baseURL string) (ReceiverInfo, error) {
+	var rx ReceiverInfo
 
 	url := strings.TrimRight(baseURL, "/") + "/api/description"
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("fetchDescription: %v (using defaults)", err)
-		return
+		return rx, err
 	}
 	defer resp.Body.Close()
 
-	var d descriptionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		log.Printf("fetchDescription decode: %v (using defaults)", err)
-		return
+	if resp.StatusCode != http.StatusOK {
+		return rx, fmt.Errorf("HTTP %s", resp.Status)
 	}
 
-	if d.Receiver.Callsign != "" {
-		rx.Callsign = d.Receiver.Callsign
+	var d descriptionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return rx, fmt.Errorf("decode: %w", err)
 	}
-	if d.Receiver.Name != "" {
-		rx.Name = d.Receiver.Name
+
+	if d.Receiver.Callsign == "" {
+		return rx, fmt.Errorf("no receiver callsign in response")
+	}
+
+	rx.Callsign = d.Receiver.Callsign
+	rx.Name = d.Receiver.Name
+	if rx.Name == "" {
+		rx.Name = "UberSDR DX Cluster"
 	}
 	rx.Location = d.Receiver.Location
 	rx.Lat = d.Receiver.GPS.Lat
 	rx.Lon = d.Receiver.GPS.Lon
 	rx.Timezone = d.Receiver.Timezone
 	rx.TimezoneOffset = d.Receiver.TimezoneOffset
-	return
+	return rx, nil
+}
+
+// mustFetchDescription retries fetchDescription every descriptionRetryDelay
+// until it succeeds. Startup does not continue without it: the receiver
+// callsign is baked into every spot line and the telnet greeting, and there is
+// no later opportunity to correct it, so serving spots under a placeholder
+// callsign is worse than waiting for the upstream to come up.
+func mustFetchDescription(baseURL string) ReceiverInfo {
+	for attempt := 1; ; attempt++ {
+		rx, err := fetchDescription(baseURL)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("fetchDescription: succeeded after %d attempts", attempt)
+			}
+			return rx
+		}
+		log.Printf("fetchDescription: %v — retrying in %s (attempt %d)",
+			err, descriptionRetryDelay, attempt)
+		time.Sleep(descriptionRetryDelay)
+	}
 }
 
 func main() {
 	ubersdrURL := flag.String("url", "http://ubersdr:8080", "Base URL of UberSDR instance")
 	webListen := flag.String("listen", ":6087", "Web UI listen address")
 	telnetListen := flag.String("telnet", ":7300", "DX cluster telnet listen address")
-	spotterCall := flag.String("spotter", "", "Callsign shown as spotter (default: fetched from /api/description)")
+	spotterCall := flag.String("spotter", "", "Callsign shown as spotter (default: fetched from /api/description, retried until it succeeds)")
 	requireLogin := flag.Bool("require-login", true, "Require a valid callsign login on telnet connect (default: true)")
 	dataDir := flag.String("data-dir", "", "Directory for persistent data (SQLite DB). Defaults to DATA_DIR env var or /data")
 	retentionDays := flag.Int("retention-days", 0, "Days of spot history to retain. Defaults to RETENTION_DAYS env var or 30")
@@ -219,8 +251,9 @@ func main() {
 	go store.RunPurge(retain)
 	log.Printf("  store    : %s (%d spots, %d-day retention)", dbPath, store.Count(), retain)
 
-	// Fetch receiver info from UberSDR
-	rx := fetchDescription(*ubersdrURL)
+	// Fetch receiver info from UberSDR — blocks until the upstream answers
+	log.Printf("fetching receiver description from %s", *ubersdrURL)
+	rx := mustFetchDescription(*ubersdrURL)
 	if *spotterCall != "" {
 		rx.Callsign = *spotterCall
 	}
