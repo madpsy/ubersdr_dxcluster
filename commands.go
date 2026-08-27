@@ -16,14 +16,51 @@ import (
 // ── Spot submission constants ──────────────────────────────────────────────
 
 const (
-	// spotMinKHz / spotMaxKHz define the valid frequency range for user-submitted spots.
-	// 10 kHz (LF lower bound) to 30 MHz (HF upper bound), expressed in kHz.
+	// spotMinKHz / spotMaxKHz are the FALLBACK frequency range for
+	// user-submitted spots, in kHz: 10 kHz (LF lower bound) to 30 MHz (HF
+	// upper bound). They apply only when /api/description does not report a
+	// tuning_range — see spotRangeKHz.
 	spotMinKHz = 10.0
 	spotMaxKHz = 30000.0
 
 	// spotMaxCommentLen is the maximum length of a spot comment after sanitisation.
 	spotMaxCommentLen = 50
 )
+
+// spotRangeKHz returns the frequency limits (in kHz) to enforce on
+// user-submitted spots for this receiver.
+//
+// An instance that reports tuning_range in /api/description tells us exactly
+// what it can hear, so a spot outside that range could not have come from this
+// receiver and is rejected. Instances that omit tuning_range (older UberSDR
+// versions) keep the previous behaviour: the built-in 10 kHz – 30 MHz range.
+func spotRangeKHz(rx ReceiverInfo) (minKHz, maxKHz float64) {
+	if rx.TuneMaxHz > 0 && rx.TuneMaxHz > rx.TuneMinHz {
+		return rx.TuneMinHz / 1000.0, rx.TuneMaxHz / 1000.0
+	}
+	return spotMinKHz, spotMaxKHz
+}
+
+// spotLimits returns this server's effective spot frequency limits in kHz.
+// The zero value guard matters because a TelnetServer built without going
+// through NewTelnetServer would otherwise have a 0 kHz maximum and reject
+// every spot rather than falling back to the default range.
+func (t *TelnetServer) spotLimits() (minKHz, maxKHz float64) {
+	if t.spotMaxKHz <= 0 || t.spotMaxKHz <= t.spotMinKHz {
+		return spotMinKHz, spotMaxKHz
+	}
+	return t.spotMinKHz, t.spotMaxKHz
+}
+
+// formatKHz renders a frequency in kHz for user-facing messages, switching to
+// MHz above 1 MHz so "60 MHz" does not read as "60000.0 kHz". The shortest
+// exact decimal is used, so round limits stay round ("30 MHz", not "30.000").
+func formatKHz(khz float64) string {
+	if khz >= 1000 {
+		return strconv.FormatFloat(khz/1000.0, 'f', -1, 64) + " MHz"
+	}
+	return strconv.FormatFloat(khz, 'f', -1, 64) + " kHz"
+}
 
 // spotCommentSanitise strips control characters and trims the comment to
 // spotMaxCommentLen runes. Tabs are converted to a single space.
@@ -358,7 +395,8 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 //	DX <freq_kHz> <callsign> [comment]
 //	DX <callsign> <freq_kHz> [comment]
 //
-// Frequency must be in the range 10 kHz – 30 MHz (expressed in kHz).
+// Frequency must be within the receiver's tuning range (expressed in kHz) —
+// see spotRangeKHz for how that range is determined.
 // Callsign must pass the standard amateur callsign regex.
 // Comment is optional; control characters are stripped and length is capped.
 func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
@@ -404,9 +442,11 @@ func (t *TelnetServer) handleDX(args []string, state *ClientState) string {
 		return "Usage: DX <freq_kHz> <callsign> [comment]"
 	}
 
-	// ── 3. Frequency validation: 10 kHz – 30 MHz ──────────────────────────
-	if freqKHz < spotMinKHz || freqKHz > spotMaxKHz {
-		return fmt.Sprintf("%.1f kHz is outside the valid range (10 kHz – 30 MHz)", freqKHz)
+	// ── 3. Frequency validation: the receiver's tuning range ──────────────
+	minKHz, maxKHz := t.spotLimits()
+	if freqKHz < minKHz || freqKHz > maxKHz {
+		return fmt.Sprintf("%.1f kHz is outside the valid range (%s – %s)",
+			freqKHz, formatKHz(minKHz), formatKHz(maxKHz))
 	}
 
 	// ── 4. Callsign validation ─────────────────────────────────────────────

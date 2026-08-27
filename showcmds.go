@@ -297,6 +297,8 @@ func (t *TelnetServer) handleShowStatus() string {
 	} else {
 		fmt.Fprintf(&b, "Receiver  : %s - %s\r\n", t.rxName, t.rxLocation)
 	}
+	statusMin, statusMax := t.spotLimits()
+	fmt.Fprintf(&b, "Spot Range: %s - %s\r\n", formatKHz(statusMin), formatKHz(statusMax))
 
 	if t.store == nil {
 		b.WriteString("Database  : not available\r\n")

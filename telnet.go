@@ -45,15 +45,20 @@ func isValidCallsign(s string) bool {
 // TelnetServer listens for DX cluster client connections and streams spots
 // in standard AR-Cluster / RBN format.
 type TelnetServer struct {
-	addr         string
-	hub          *Hub
-	store        *SpotStore
-	spotterCall  string
-	rxCallsign   string
-	rxName       string
-	rxLocation   string
-	rxLat        float64
-	rxLon        float64
+	addr        string
+	hub         *Hub
+	store       *SpotStore
+	spotterCall string
+	rxCallsign  string
+	rxName      string
+	rxLocation  string
+	rxLat       float64
+	rxLon       float64
+	// spotMin/spotMaxKHz bound user-submitted DX spots. They follow the
+	// receiver's reported tuning range when /api/description advertises one,
+	// otherwise the built-in 10 kHz – 30 MHz default.
+	spotMinKHz   float64
+	spotMaxKHz   float64
 	ubersdrURL   string // base URL for /api/lookup (QRZ) and /api/cty calls
 	clients      atomic.Int32
 	version      string
@@ -68,6 +73,7 @@ type TelnetServer struct {
 }
 
 func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string, rx ReceiverInfo, ubersdrURL string, requireLogin bool, spotPassword string) *TelnetServer {
+	minKHz, maxKHz := spotRangeKHz(rx)
 	return &TelnetServer{
 		addr:         addr,
 		hub:          hub,
@@ -78,6 +84,8 @@ func NewTelnetServer(addr string, hub *Hub, store *SpotStore, spotterCall string
 		rxLocation:   rx.Location,
 		rxLat:        rx.Lat,
 		rxLon:        rx.Lon,
+		spotMinKHz:   minKHz,
+		spotMaxKHz:   maxKHz,
 		ubersdrURL:   ubersdrURL,
 		version:      "ubersdr_dxcluster/1.0",
 		requireLogin: requireLogin,
@@ -226,6 +234,8 @@ func (t *TelnetServer) handleConn(conn net.Conn, remoteAddr string) {
 	if t.rxLocation != "" {
 		fmt.Fprintf(conn, "Location  : %s\r\n", t.rxLocation)
 	}
+	bannerMin, bannerMax := t.spotLimits()
+	fmt.Fprintf(conn, "Spot Range: %s - %s\r\n", formatKHz(bannerMin), formatKHz(bannerMax))
 	fmt.Fprintf(conn, "Streaming live Digital, CW, Voice and DX Cluster spots from UberSDR.\r\n\r\n")
 
 	if t.requireLogin {

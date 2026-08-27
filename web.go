@@ -58,6 +58,12 @@ type ReceiverInfo struct {
 	// TimezoneOffset (minutes) is only a fallback for when the name is absent.
 	Timezone       string
 	TimezoneOffset int
+	// TuneMinHz / TuneMaxHz are the receiver's hardware tuning limits in Hz,
+	// as reported by tuning_range in /api/description. Older UberSDR versions
+	// omit that object; TuneMaxHz == 0 means "not reported" and callers fall
+	// back to the built-in spotMinKHz/spotMaxKHz defaults.
+	TuneMinHz float64
+	TuneMaxHz float64
 }
 
 func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, store *SpotStore, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {

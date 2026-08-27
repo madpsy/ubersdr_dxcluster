@@ -32,6 +32,14 @@ type descriptionResponse struct {
 		Timezone       string `json:"timezone"`
 		TimezoneOffset int    `json:"timezone_offset"`
 	} `json:"receiver"`
+
+	// TuningRange is the hardware tuning range of the receiver, in Hz. Not
+	// every UberSDR version reports it, so it is a pointer: nil means "not
+	// reported" and the caller falls back to its own default spot limits.
+	TuningRange *struct {
+		MinFrequency float64 `json:"min_frequency"`
+		MaxFrequency float64 `json:"max_frequency"`
+	} `json:"tuning_range"`
 }
 
 // CountryEntry is one entry from /api/cty/countries.
@@ -122,6 +130,14 @@ func fetchDescription(baseURL string) (ReceiverInfo, error) {
 	rx.Lon = d.Receiver.GPS.Lon
 	rx.Timezone = d.Receiver.Timezone
 	rx.TimezoneOffset = d.Receiver.TimezoneOffset
+
+	// A tuning range is only usable if the upstream actually reported one and
+	// it makes sense. Anything else leaves the zero value, which downstream
+	// reads as "not reported" and substitutes the built-in default range.
+	if tr := d.TuningRange; tr != nil && tr.MaxFrequency > tr.MinFrequency && tr.MaxFrequency > 0 {
+		rx.TuneMinHz = tr.MinFrequency
+		rx.TuneMaxHz = tr.MaxFrequency
+	}
 	return rx, nil
 }
 
@@ -269,6 +285,14 @@ func main() {
 		log.Printf("  timezone : %s (UTC%+d min)", rx.Timezone, rx.TimezoneOffset)
 	} else {
 		log.Printf("  timezone : not reported — stats page will offer UTC and local only")
+	}
+	spotMin, spotMax := spotRangeKHz(rx)
+	if rx.TuneMaxHz > 0 {
+		log.Printf("  spot rng : %s – %s (receiver tuning range)",
+			formatKHz(spotMin), formatKHz(spotMax))
+	} else {
+		log.Printf("  spot rng : %s – %s (tuning range not reported — using default)",
+			formatKHz(spotMin), formatKHz(spotMax))
 	}
 
 	hub := NewHub(store)

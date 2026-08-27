@@ -114,7 +114,8 @@ SPOT SUBMISSION  (requires SPOT_PASSWORD to be set by the administrator)
   dx <freq_kHz> <callsign>      Submit a manual DX spot (freq and callsign can
   dx <callsign> <freq_kHz>        be in either order). An optional comment may
     [comment]                     follow the callsign.
-                                  Frequency must be 10 kHz – 30 MHz (in kHz).
+                                  Frequency (in kHz) must be within the
+                                    receiver's tuning range - see SHOW/STATUS.
                                   Callsign must be a valid amateur callsign.
                                   The spot is broadcast to all connected clients
                                   and saved to the database immediately.
