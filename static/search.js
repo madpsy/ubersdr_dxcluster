@@ -40,12 +40,23 @@ const searchState = {
   countries: new Map(),  // code → display name
   open: false,
   built: false,
-  // Paging: the query that produced the current table, plus where to resume.
-  lastQuery: null,
-  nextCursor: null,
-  nextOffset: null,
   inFlight: null,        // AbortController for the running request
-  rows: 0,
+
+  // ── Paging ──
+  // baseQuery is the filter half of the query, without any paging parameters;
+  // page and limit are the position within it.
+  baseQuery: null,
+  page: 0,
+  limit: 100,
+  rows: 0,               // rows on the page currently shown
+  total: null,           // null until a page has reported one
+  totalCapped: false,
+  hasMore: false,        // the server's answer when the total is unknown
+  // cursors[n] is the cursor that starts page n (cursors[0] is always null).
+  // Filled in as pages are visited, which makes stepping through pages a keyset
+  // seek rather than an offset scan. Only a ts sort produces cursors; other
+  // sorts fall back to offset, and this stays empty.
+  cursors: [null],
 };
 
 let searchDebounce = null;
@@ -77,6 +88,47 @@ function abortSearch() {
     searchState.inFlight.abort();
     searchState.inFlight = null;
   }
+}
+
+// ── Collapsing the filter form ─────────────────────────────────────────────
+//
+// The form is the tallest part of the modal, and once a search is set up it is
+// mostly in the way. Collapsing it hands that space to the results — and moves
+// the applied filters into the status strip, so hiding the controls never means
+// losing track of what they are set to.
+
+const SEARCH_COLLAPSE_KEY = 'dxc.search.filtersCollapsed';
+
+function setSearchFiltersCollapsed(collapsed) {
+  const modal = document.getElementById('search-modal');
+  if (modal) modal.classList.toggle('filters-collapsed', collapsed);
+  try {
+    localStorage.setItem(SEARCH_COLLAPSE_KEY, collapsed ? '1' : '0');
+  } catch (_) {
+    // Private browsing and blocked site data both throw here; the toggle still
+    // works for this session, it just will not be remembered.
+  }
+}
+
+function toggleSearchFilters() {
+  const modal = document.getElementById('search-modal');
+  setSearchFiltersCollapsed(!(modal && modal.classList.contains('filters-collapsed')));
+}
+
+// expandSearchFilters is the way back from the collapsed summary: clicking the
+// applied filters reopens the controls that set them.
+function expandSearchFilters() {
+  const modal = document.getElementById('search-modal');
+  if (modal && modal.classList.contains('filters-collapsed')) setSearchFiltersCollapsed(false);
+}
+
+function restoreSearchFiltersCollapsed() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(SEARCH_COLLAPSE_KEY);
+  } catch (_) { /* unreadable storage reads as "never set" */ }
+  const modal = document.getElementById('search-modal');
+  if (modal) modal.classList.toggle('filters-collapsed', stored === '1');
 }
 
 // ── Form construction ──────────────────────────────────────────────────────
@@ -132,6 +184,7 @@ function buildSearchForm() {
 
   buildSearchHead();
   populateCountryList();
+  restoreSearchFiltersCollapsed();
 
   // Text inputs run the search on a pause in typing; pickers run it at once.
   ['sq-callsign', 'sq-spotter', 'sq-locator', 'sq-text'].forEach(id => {
@@ -151,6 +204,20 @@ function buildSearchForm() {
 
   const country = document.getElementById('sq-country');
   if (country) country.addEventListener('change', onCountryPicked);
+
+  // The page box lives in the footer, outside the form's Enter handler, so it
+  // needs its own — and it jumps rather than re-running the search.
+  const pageInput = document.getElementById('sq-page');
+  if (pageInput) {
+    const jump = () => {
+      const n = parseInt(pageInput.value, 10);
+      if (!isNaN(n)) gotoSearchPage(n - 1); else renderPager();
+    };
+    pageInput.addEventListener('change', jump);
+    pageInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); jump(); }
+    });
+  }
 
   // Enter runs the search from anywhere in the form.
   const form = document.getElementById('search-form');
@@ -320,10 +387,15 @@ function buildSearchQuery() {
   const sort = val('sq-sort'), order = val('sq-order');
   if (sort && sort !== 'ts') q.set('sort', sort);
   if (order) q.set('order', order);
-  const limit = val('sq-limit');
-  if (limit && limit !== '100') q.set('limit', limit);
 
   return q;
+}
+
+// cursorsUsable reports whether the current sort supports keyset paging. Only
+// the time sort does — it is the one backed by an index, and the only one whose
+// position a cursor can describe.
+function cursorsUsable() {
+  return (val('sq-sort') || 'ts') === 'ts';
 }
 
 function val(id) {
@@ -346,31 +418,56 @@ function scheduleSearch() {
   searchDebounce = setTimeout(runSearch, 350);
 }
 
+// runSearch starts a new query: the filters have changed, so the total and
+// every cursor learned for the old one are stale.
 async function runSearch() {
   clearTimeout(searchDebounce);
-  const q = buildSearchQuery();
-  searchState.lastQuery = q;
-  searchState.rows = 0;
-  await fetchSearchPage(q, false);
+  searchState.baseQuery = buildSearchQuery();
+  searchState.limit = parseInt(val('sq-limit'), 10) || 100;
+  searchState.page = 0;
+  searchState.total = null;
+  searchState.totalCapped = false;
+  searchState.cursors = [null];
+  await fetchSearchPage();
 }
 
-async function loadMoreSearch() {
-  if (!searchState.lastQuery) return;
-  const q = new URLSearchParams(searchState.lastQuery);
-  if (searchState.nextCursor) {
-    q.set('cursor', searchState.nextCursor);
-  } else if (searchState.nextOffset != null) {
-    q.set('offset', String(searchState.nextOffset));
-  } else {
-    return;
+// gotoSearchPage moves within the current result set.
+//
+// Stepping to a page next to one already visited uses that page's cursor, which
+// seeks straight to the boundary. Jumping to a distant page has no cursor to
+// use and falls back to offset — slower, but it is a deliberate act and the
+// server caps how far it can reach.
+async function gotoSearchPage(page) {
+  if (!searchState.baseQuery) return;
+  const last = lastSearchPage();
+  if (page < 0) page = 0;
+  if (last != null && page > last) page = last;
+  if (page === searchState.page && searchState.rows) return;
+  searchState.page = page;
+  await fetchSearchPage();
+}
+
+// lastSearchPage is the highest page index, or null when the total is unknown
+// (count=none) or capped, in which case paging is driven by has_more instead.
+function lastSearchPage() {
+  if (searchState.total == null || searchState.totalCapped) return null;
+  return Math.max(0, Math.ceil(searchState.total / searchState.limit) - 1);
+}
+
+async function fetchSearchPage() {
+  const q = new URLSearchParams(searchState.baseQuery);
+  q.set('limit', String(searchState.limit));
+
+  const page = searchState.page;
+  if (page > 0) {
+    const cursor = cursorsUsable() ? searchState.cursors[page] : null;
+    if (cursor) q.set('cursor', cursor);
+    else q.set('offset', String(page * searchState.limit));
   }
-  // The total was already established by the first page; re-counting it on
-  // every "load more" would double the cost of paging for no new information.
-  q.set('count', 'none');
-  await fetchSearchPage(q, true);
-}
+  // The total describes the filter, not the page, so it only needs working out
+  // once per query — every page after the first asks the server to skip it.
+  q.set('count', searchState.total == null ? 'capped' : 'none');
 
-async function fetchSearchPage(q, append) {
   // A search in flight is a search nobody wants any more the moment the filters
   // change, so it is cancelled rather than raced.
   abortSearch();
@@ -385,7 +482,7 @@ async function fetchSearchPage(q, append) {
       showSearchError(data.error || ('HTTP ' + resp.status));
       return;
     }
-    renderSearchResults(data, append);
+    renderSearchResults(data);
   } catch (err) {
     if (err.name !== 'AbortError') showSearchError('Search failed: ' + err.message);
   } finally {
@@ -408,8 +505,11 @@ function showSearchError(msg) {
     summary.textContent = msg;
     summary.className = 'search-error';
   }
-  const more = document.getElementById('search-more');
-  if (more) more.hidden = true;
+  // A rejected query has no pages, so nothing should look navigable.
+  ['search-first', 'search-prev', 'search-next'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = true;
+  });
 }
 
 // ── Results ────────────────────────────────────────────────────────────────
@@ -473,15 +573,16 @@ function markSortedHeader() {
   });
 }
 
-function renderSearchResults(data, append) {
+function renderSearchResults(data) {
   const tbody = document.getElementById('search-tbody');
   if (!tbody) return;
-  if (!append) tbody.innerHTML = '';
+  tbody.innerHTML = '';
 
   const spots = data.spots || [];
-  searchState.rows = (append ? searchState.rows : 0) + spots.length;
+  searchState.rows = spots.length;
+  searchState.hasMore = !!data.has_more;
 
-  if (!append && spots.length === 0) {
+  if (spots.length === 0) {
     tbody.innerHTML = '<tr><td colspan="' + SEARCH_COLUMNS.length +
       '" class="no-data">No spots match these filters.</td></tr>';
   }
@@ -489,15 +590,49 @@ function renderSearchResults(data, append) {
   const frag = document.createDocumentFragment();
   spots.forEach(sp => frag.appendChild(buildSearchRow(sp)));
   tbody.appendChild(frag);
+  // A new page starts at the top; keeping the old scroll position would land
+  // the reader in the middle of rows they have not seen.
+  const box = document.getElementById('search-results');
+  if (box) box.scrollTop = 0;
 
-  // Paging state for the next "Load more".
-  searchState.nextCursor = data.next_cursor || null;
-  searchState.nextOffset = (data.next_offset != null) ? data.next_offset : null;
-  const more = document.getElementById('search-more');
-  if (more) more.hidden = !data.has_more;
+  if (data.total != null) {
+    searchState.total = data.total;
+    searchState.totalCapped = !!data.total_capped;
+  }
+  // Remember where the next page begins, so stepping forward is a keyset seek
+  // rather than an offset scan.
+  if (data.next_cursor) searchState.cursors[searchState.page + 1] = data.next_cursor;
 
   updateSearchSummary(data);
+  renderPager();
   markSortedHeader();
+}
+
+// renderPager updates the page controls from the current paging state.
+function renderPager() {
+  const last = lastSearchPage();
+  const page = searchState.page;
+
+  const first = document.getElementById('search-first');
+  const prev  = document.getElementById('search-prev');
+  const next  = document.getElementById('search-next');
+  if (first) first.disabled = page === 0;
+  if (prev)  prev.disabled  = page === 0;
+  // With a capped or absent total there is no last page to compare against, so
+  // the server's has_more is what says whether Next leads anywhere.
+  if (next)  next.disabled = (last != null) ? page >= last : !searchState.hasMore;
+
+  const input = document.getElementById('sq-page');
+  if (input) {
+    input.value = page + 1;
+    input.max = (last != null) ? last + 1 : '';
+  }
+  const totalEl = document.getElementById('search-page-total');
+  if (totalEl) {
+    totalEl.textContent = (last != null)
+      ? 'of ' + (last + 1).toLocaleString()
+      : (searchState.totalCapped ? 'of many' : '');
+  }
 }
 
 function updateSearchSummary(data) {
@@ -507,17 +642,21 @@ function updateSearchSummary(data) {
 
   if (summary) {
     summary.className = '';
+    // "Showing 201–300 of 4,099" — which slice of what, rather than a bare count.
+    const from = searchState.page * searchState.limit + 1;
+    const to   = searchState.page * searchState.limit + searchState.rows;
     let text;
-    if (data.total == null) {
-      text = searchState.rows.toLocaleString() + ' shown';
+    if (searchState.rows === 0) {
+      text = 'No matches';
+    } else if (searchState.total == null) {
+      text = 'Showing ' + from.toLocaleString() + '\u2013' + to.toLocaleString();
     } else {
-      const total = data.total_capped
-        ? 'over ' + data.total.toLocaleString()
-        : data.total.toLocaleString();
-      text = total + ' match' + (data.total === 1 ? '' : 'es') +
-             ' · showing ' + searchState.rows.toLocaleString();
+      const total = (searchState.totalCapped ? 'over ' : '') +
+                    searchState.total.toLocaleString();
+      text = 'Showing ' + from.toLocaleString() + '\u2013' + to.toLocaleString() +
+             ' of ' + total;
     }
-    if (data.warnings && data.warnings.length) text += ' · ' + data.warnings.join('; ');
+    if (data.warnings && data.warnings.length) text += ' \u00b7 ' + data.warnings.join('; ');
     summary.textContent = text;
   }
 
@@ -531,11 +670,70 @@ function updateSearchSummary(data) {
   if (win && data.filter) {
     win.textContent = shortUTC(data.filter.from) + ' → ' + shortUTC(data.filter.to) + ' UTC';
   }
-  if (note) {
-    note.textContent = data.has_more
-      ? 'More results available'
-      : (searchState.rows ? 'End of results' : '');
+  renderAppliedFilters(data.filter);
+  if (note) note.textContent = '';
+}
+
+// renderAppliedFilters shows what the results were actually filtered by. It
+// reads the server's echoed filter rather than the form, so it describes the
+// query that produced these rows even if the form has been edited since.
+function renderAppliedFilters(filter) {
+  const box = document.getElementById('search-active-filters');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!filter) return;
+
+  describeAppliedFilter(filter).forEach(text => {
+    const chip = document.createElement('span');
+    chip.className = 'sf-applied';
+    chip.textContent = text;
+    box.appendChild(chip);
+  });
+}
+
+// describeAppliedFilter turns the echoed filter into short human phrases. The
+// time window is left out — the modal header already spells it out in full.
+function describeAppliedFilter(f) {
+  const out = [];
+  const list = (key, prefix) => {
+    if (Array.isArray(f[key]) && f[key].length) out.push((prefix || '') + f[key].join('/'));
+  };
+
+  list('band');
+  list('mode');
+  list('stream');
+  list('continent');
+  if (Array.isArray(f.country_code) && f.country_code.length) {
+    out.push(f.country_code.map(c => countryFlag(c) + ' ' + c).join(' '));
   }
+  list('country');
+  list('cq_zone', 'CQ ');
+
+  if (f.callsign)       out.push('call ' + f.callsign + '*');
+  if (f.callsign_exact) out.push('call ' + f.callsign_exact);
+  if (f.spotter)        out.push('de ' + f.spotter + '*');
+  if (f.spotter_exact)  out.push('de ' + f.spotter_exact);
+  if (f.locator)        out.push('grid ' + f.locator);
+  if (f.q)              out.push('\u201c' + f.q + '\u201d');
+  list('callsign_exclude', 'not ');
+  list('spotter_exclude', 'not de ');
+
+  // Ranges read better as one phrase than as two half-open bounds.
+  const range = (min, max, label, unit) => {
+    const lo = f[min], hi = f[max];
+    if (lo == null && hi == null) return;
+    if (lo != null && hi != null) out.push(label + ' ' + lo + '\u2013' + hi + (unit || ''));
+    else if (lo != null)          out.push(label + ' \u2265 ' + lo + (unit || ''));
+    else                          out.push(label + ' \u2264 ' + hi + (unit || ''));
+  };
+  range('snr_min', 'snr_max', 'SNR', ' dB');
+  range('freq_min', 'freq_max', '', ' kHz');
+  range('dist_min', 'dist_max', '', ' km');
+  range('wpm_min', 'wpm_max', '', ' wpm');
+  range('hour_min', 'hour_max', '', 'h UTC');
+  if (f.conf_min != null) out.push('conf \u2265 ' + f.conf_min);
+
+  return out;
 }
 
 function shortUTC(iso) {
@@ -587,8 +785,13 @@ function fullUTC(iso) {
 
 // ── Export and sharing ─────────────────────────────────────────────────────
 
+// searchApiUrl rebuilds the URL behind what is on screen, including the page
+// you are looking at — so a copied URL returns the same rows, not just the
+// same filter.
 function searchApiUrl(extra) {
-  const q = new URLSearchParams(searchState.lastQuery || buildSearchQuery());
+  const q = new URLSearchParams(searchState.baseQuery || buildSearchQuery());
+  q.set('limit', String(searchState.limit));
+  if (searchState.page > 0) q.set('offset', String(searchState.page * searchState.limit));
   if (extra) Object.entries(extra).forEach(([k, v]) => q.set(k, v));
   const base = window.location.origin + BASE + '/api/search?';
   return base + q.toString();
@@ -611,7 +814,9 @@ async function copySearchApiUrl() {
 // rows on screen would be a surprise.
 function downloadSearchCsv() {
   const max = SLIMITS.max_limit || 1000;
-  window.location.href = searchApiUrl({ format: 'csv', limit: String(max), count: 'none' });
+  // Export the search, not the page: an export that stopped at whichever page
+  // you were on would be a surprise.
+  window.location.href = searchApiUrl({ format: 'csv', limit: String(max), count: 'none', offset: '0' });
   flashSearchNote('Downloading up to ' + max.toLocaleString() + ' rows as CSV');
 }
 
@@ -655,6 +860,7 @@ function resetSearch() {
   const limitSel = document.getElementById('sq-limit');
   if (limitSel) limitSel.value = '100';
 
+  searchState.page = 0;
   runSearch();
 }
 

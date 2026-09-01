@@ -617,7 +617,17 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 }
 .term-send-btn:hover { border-color: var(--blue); color: var(--blue); }
 
-/* ── Responsive header ── */
+/* ── Responsive header ──
+   The header is one flex row of ~14 items, and it wraps to two rows sooner than
+   anything else on the page gives way. So it sheds text in priority order, most
+   expendable first: the Search/Stats/Client words (their icons and tooltips
+   still say what they are), then the receiver location, then the counters. */
+@media (max-width: 1600px) {
+  /* Icon-only header buttons. Worth ~150px across the three, which is roughly
+     what the header is short by when it first wraps. */
+  .hdr-label { display: none; }
+  .hdr-download, .hdr-btn { padding: 3px 9px; }
+}
 @media (max-width: 800px) {
   /* Hide the location text before it can cause the rx-info pill to wrap */
   .rx-loc { display: none; }
@@ -747,6 +757,19 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 }
 .search-hdr-btn + .search-hdr-btn { margin-left: 0; }
 .search-hdr-btn:hover { border-color: var(--blue); color: var(--blue); }
+/* Collapse toggle. The form is the tallest thing in the modal, so hiding it is
+   the difference between a dozen visible results and thirty. */
+.search-filters-toggle {
+  padding: 4px 10px; border-radius: 5px;
+  border: 1px solid var(--border2); background: var(--surface2);
+  color: var(--muted); font-size: 11px; font-family: inherit;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.search-filters-toggle:hover { border-color: var(--blue); color: var(--blue); }
+.sf-caret { display: inline-block; font-size: 8px; transition: transform 0.15s; }
+#search-modal.filters-collapsed #search-form { display: none; }
+#search-modal.filters-collapsed .sf-caret { transform: rotate(180deg); }
+
 #search-close {
   margin-left: 4px; background: none; border: none;
   color: var(--muted); font-size: 22px; cursor: pointer;
@@ -841,6 +864,23 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
   font-size: 12px; color: var(--text); flex-shrink: 0;
 }
 #search-summary.search-error { color: var(--red); }
+
+/* What is actually applied, echoed from the server's resolved filter. It earns
+   its place most when the form is collapsed, which is exactly when you can no
+   longer see the controls that set it. */
+#search-active-filters {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  min-width: 0; overflow: hidden;
+}
+#search-modal.filters-collapsed #search-active-filters { cursor: pointer; }
+.sf-applied {
+  padding: 1px 7px; border-radius: 20px;
+  border: 1px solid var(--border2); background: var(--surface2);
+  color: var(--muted); font-size: 10px; white-space: nowrap;
+}
+#search-modal.filters-collapsed .sf-applied {
+  border-color: rgba(56,189,248,0.4); color: var(--blue);
+}
 #search-timing {
   margin-left: auto; font-family: var(--mono);
   font-size: 11px; color: var(--muted);
@@ -878,11 +918,41 @@ select[multiple] option:checked { background: var(--blue); color: #000; }
 #search-results .no-data { text-align: center; color: var(--dim); padding: 32px; }
 
 #search-footer {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 8px;
   padding: 8px 16px; border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-#search-footer-note { font-size: 11px; color: var(--muted); }
+#search-footer-note { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+.sf-page-btn {
+  padding: 4px 12px; border-radius: 5px;
+  border: 1px solid var(--border2); background: var(--surface2);
+  color: var(--text); font-size: 12px; font-family: inherit;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.sf-page-btn:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+.sf-page-btn:disabled { opacity: 0.35; cursor: default; }
+
+.sf-pager {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+}
+#sq-page {
+  width: 58px; padding: 4px 6px; border-radius: 5px;
+  border: 1px solid var(--border2); background: var(--surface);
+  color: var(--text); font-family: var(--mono); font-size: 12px;
+  text-align: center;
+}
+#sq-page:focus { outline: none; border-color: var(--blue); }
+#search-page-total { font-family: var(--mono); }
+
+.sf-pagesize { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
+.sf-pagesize select {
+  padding: 4px 6px; border-radius: 5px;
+  border: 1px solid var(--border2); background: var(--surface);
+  color: var(--text); font-size: 12px; font-family: var(--font);
+}
+.sf-pagesize select:focus { outline: none; border-color: var(--blue); }
 
 @media (max-width: 900px) {
   .sf-label-lead { width: auto; text-align: left; }

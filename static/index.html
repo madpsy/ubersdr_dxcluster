@@ -81,12 +81,12 @@
     <span>DX</span>
   </div>
   <button class="conn-pill hdr-download hdr-btn" onclick="openSearchModal()"
-     title="Search the spot archive (press / or Ctrl-K)">🔎 Search</button>
+     title="Search the spot archive (press / or Ctrl-K)">🔎<span class="hdr-label"> Search</span></button>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/stats"
-     title="Spot statistics and propagation analysis">📊 Stats</a>
+     title="Spot statistics and propagation analysis">📊<span class="hdr-label"> Stats</span></a>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/client/download"
      onclick="showClientInfo()"
-     title="Download the desktop DX Cluster client for your operating system">⬇️ Client</a>
+     title="Download the desktop DX Cluster client for your operating system">⬇️<span class="hdr-label"> Client</span></a>
 
   <div class="stat-pill" id="telnet-pill" style="display:none">
     <span class="lbl">Telnet</span>
@@ -362,6 +362,9 @@
     <div id="search-hdr">
       <span>🔎</span> Search Spots
       <span class="search-hdr-note" id="search-window-note"></span>
+      <button class="search-filters-toggle" onclick="toggleSearchFilters()"
+              title="Show or hide the filter controls">
+        <span class="sf-caret">▲</span> Filters</button>
       <button class="search-hdr-btn" onclick="copySearchApiUrl()"
               title="Copy the /api/search URL for this exact query">🔗 API URL</button>
       <button class="search-hdr-btn" onclick="downloadSearchCsv()"
@@ -458,11 +461,6 @@
             <option value="desc">Descending</option>
             <option value="asc">Ascending</option>
           </select></label>
-        <label class="sf-field"><span class="sf-label">Rows</span>
-          <select id="sq-limit">
-            <option>50</option><option selected>100</option>
-            <option>250</option><option>500</option><option>1000</option>
-          </select></label>
         <span class="sf-spacer"></span>
         <button id="sq-run" class="sf-run-btn" onclick="runSearch()">Search</button>
       </div>
@@ -470,6 +468,8 @@
 
     <div id="search-status">
       <span id="search-summary">Set a filter and press Search — or just search the last 24 hours.</span>
+      <span id="search-active-filters" onclick="expandSearchFilters()"
+            title="Filters applied to these results — click to edit"></span>
       <span id="search-timing"></span>
     </div>
 
@@ -483,7 +483,24 @@
     </div>
 
     <div id="search-footer">
-      <button id="search-more" class="sf-run-btn" onclick="loadMoreSearch()" hidden>Load more</button>
+      <button id="search-first" class="sf-page-btn" onclick="gotoSearchPage(0)"
+              title="First page">&laquo;</button>
+      <button id="search-prev" class="sf-page-btn" onclick="gotoSearchPage(searchState.page - 1)"
+              title="Previous page">&lsaquo; Prev</button>
+      <span class="sf-pager">
+        Page
+        <input id="sq-page" type="number" min="1" value="1" title="Jump to a page">
+        <span id="search-page-total"></span>
+      </span>
+      <button id="search-next" class="sf-page-btn" onclick="gotoSearchPage(searchState.page + 1)"
+              title="Next page">Next &rsaquo;</button>
+      <label class="sf-pagesize">
+        <span class="sf-label">Rows</span>
+        <select id="sq-limit">
+          <option>25</option><option>50</option><option selected>100</option>
+          <option>250</option><option>500</option><option>1000</option>
+        </select>
+      </label>
       <span id="search-footer-note"></span>
     </div>
 

@@ -197,8 +197,15 @@ can automate by copying.
 - **Country** — type-ahead over the DXCC list, added as removable chips
 - **Ranges** — SNR, frequency, distance, CW speed and UTC hour-of-day
 - **Sorting** — click any column header; a second click reverses it
-- **Paging** — **Load more** pages forward at constant cost, however deep you go
-- **⬇️ CSV** — the same query as a spreadsheet
+- **Paging** — numbered pages with a jump box and a rows-per-page selector
+  (25–1000). Stepping between adjacent pages uses a cursor, so Next and Prev
+  stay at ~1 ms however deep you are; jumping to a distant page falls back to
+  an offset
+- **Collapsible filters** — the **▲ Filters** button folds the form away and
+  hands its space to the results, roughly doubling the visible rows. The
+  applied filters move into the status strip, so hiding the controls never
+  means losing track of what they are set to. The choice is remembered
+- **⬇️ CSV** — the whole search as a spreadsheet, not just the page on screen
 
 ### Search API
 
