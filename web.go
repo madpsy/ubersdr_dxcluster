@@ -44,6 +44,11 @@ type WebServer struct {
 	store      *SpotStore
 	tmpl       *template.Template
 	statsTmpl  *template.Template
+	// searchSem bounds concurrent /api/search queries — see searchMaxConcurrent.
+	searchSem chan struct{}
+	// searchMeta is the fixed picker data injected into index.html, built once
+	// at startup — see SearchUIMeta.
+	searchMeta map[string]any
 }
 
 // ReceiverInfo holds static data fetched from /api/description at startup.
@@ -98,6 +103,8 @@ func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryE
 		store:      store,
 		tmpl:       tmpl,
 		statsTmpl:  statsTmpl,
+		searchSem:  make(chan struct{}, searchMaxConcurrent),
+		searchMeta: SearchUIMeta(),
 	}, nil
 }
 
@@ -126,6 +133,10 @@ func (w *WebServer) ListenAndServe() error {
 	mux.HandleFunc("/stats", w.handleStatsPage)
 	mux.HandleFunc("/stats/", w.handleStatsPage)
 	w.registerStatsRoutes(mux)
+
+	// Public parametric search API + its plain-text parameter reference
+	w.registerSearchRoutes(mux)
+	mux.HandleFunc("/api/search/docs", w.handleSearchDocs)
 
 	// SSE relay
 	mux.HandleFunc("/api/events", w.handleEvents)
@@ -160,12 +171,17 @@ func (w *WebServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
 		Name       string
 		Location   string
 		TelnetAddr string
+		// SearchMeta is rendered inside a <script> block; html/template marshals
+		// it to JSON and escapes it for that context, so the search modal's
+		// pickers are populated before any script runs.
+		SearchMeta map[string]any
 	}{
 		BasePath:   bp,
 		Callsign:   w.rxCallsign,
 		Name:       w.rxName,
 		Location:   w.rxLocation,
 		TelnetAddr: w.telnetAddr,
+		SearchMeta: w.searchMeta,
 	})
 }
 

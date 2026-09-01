@@ -208,12 +208,17 @@ function connect() {
 }
 
 // ── Country list loader ────────────────────────────────────────────────────
+// The fetched list is published on window.COUNTRIES and announced with a
+// `countries-loaded` event, so the search modal reuses this one request rather
+// than issuing a second identical one when it opens.
 async function loadCountries() {
   try {
     const resp = await fetch(BASE + '/api/countries');
     if (!resp.ok) return;
     const countries = await resp.json();
     if (!Array.isArray(countries) || countries.length === 0) return;
+    window.COUNTRIES = countries;
+    document.dispatchEvent(new CustomEvent('countries-loaded'));
     const sel = document.getElementById('f-country');
     if (!sel) return;
     // Keep the "All" option, append country options sorted alphabetically
@@ -922,6 +927,13 @@ function showSpotMenu(e, d) {
   let hasTelnet = false;
 
   if (call) {
+    // Search the archive for this station — the one menu entry that needs no
+    // telnet session, so it goes first.
+    item('🔎', 'Search archive: ' + call, () => {
+      closeSpotMenu();
+      document.dispatchEvent(new CustomEvent('search-callsign', { detail: call }));
+    });
+    sep();
     item('🔍', 'Show QRZ: ' + call,
       () => spotSendCommand('show/qrz ' + call));
     item('📡', 'Show DX: ' + call,

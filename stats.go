@@ -1026,12 +1026,7 @@ func (s *SpotStore) ListSpots(f StatsFilter, limit, offset int) ([]Spot, int64, 
 		return nil, 0, err
 	}
 
-	rows, err := s.db.Query(`
-		SELECT stream, ts, band, callsign, freq_hz, snr,
-		       country, country_code, continent, cq_zone,
-		       mode, comment, message, spotter, wpm, locator,
-		       voice_mode, est_dial_freq, confidence, bandwidth,
-		       avg_signal_db, peak_signal_db, distance_km, bearing_deg
+	rows, err := s.db.Query(`SELECT `+spotColumns+`
 		FROM spots WHERE `+whereSQL+`
 		ORDER BY ts DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
@@ -1052,7 +1047,10 @@ func (s *SpotStore) ListSpots(f StatsFilter, limit, offset int) ([]Spot, int64, 
 
 // scanSpot reads one spots row into a Spot. Every text/number column is
 // nullable in practice — each stream populates a different subset.
-func scanSpot(rows *sql.Rows) (Spot, error) {
+//
+// extra receives any destinations selected after the standard spot columns —
+// the search endpoint appends the row id there for its pagination cursor.
+func scanSpot(rows *sql.Rows, extra ...any) (Spot, error) {
 	var sp Spot
 	var ts int64
 	var cqZone, wpm, estDialFreq, bandwidth sql.NullInt64
@@ -1060,14 +1058,14 @@ func scanSpot(rows *sql.Rows) (Spot, error) {
 	var stream, band, callsign, country, countryCode, continent sql.NullString
 	var mode, comment, message, spotter, locator, voiceMode sql.NullString
 
-	err := rows.Scan(
+	dest := []any{
 		&stream, &ts, &band, &callsign, &sp.FreqHz, &sp.SNR,
 		&country, &countryCode, &continent, &cqZone,
 		&mode, &comment, &message, &spotter, &wpm, &locator,
 		&voiceMode, &estDialFreq, &confidence, &bandwidth,
 		&avgSignalDB, &peakSignalDB, &distanceKM, &bearingDeg,
-	)
-	if err != nil {
+	}
+	if err := rows.Scan(append(dest, extra...)...); err != nil {
 		return sp, err
 	}
 	sp.Stream = StreamType(stream.String)

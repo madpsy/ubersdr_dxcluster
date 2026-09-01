@@ -16,6 +16,8 @@ A full-featured DX cluster add-on for [UberSDR](https://ubersdr.org) that turns 
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
 - [Web UI](#web-ui)
+- [Search](#search)
+  - [Search API](#search-api)
 - [Statistics & Analysis](#statistics--analysis)
   - [Stats API](#stats-api)
 - [Telnet Interface](#telnet-interface)
@@ -168,7 +170,120 @@ The web UI is served at `http://your-ubersdr-host/addon/dxcluster/` (or directly
 - **Telnet connection info** — the header shows the telnet address so you can quickly configure your logging software
 - **Desktop client download** — a download button serves the correct client binary for your OS, pre-named with this instance's callsign for automatic targeting
 - **Command reference** — a searchable help modal with the full telnet command reference
+- **Archive search** — a 🔎 Search button (or `/`, or `Ctrl-K`) opens a search over every stored spot, described below
 - **Statistics dashboard** — a 📊 Stats link in the header opens the analysis pages described below
+
+---
+
+## Search
+
+Everything the cluster has heard stays queryable for the whole retention period.
+The **🔎 Search** button in the header (or pressing `/`, or `Ctrl-K`) opens a
+search over that archive; right-clicking any live spot offers **Search archive**
+for that callsign.
+
+The modal is a front end for one public endpoint and nothing else — every
+control maps to a single query parameter, and the **🔗 API URL** button hands
+you the exact URL the modal just used. So anything you can find by clicking, you
+can automate by copying.
+
+**In the modal:**
+
+- **Free text** — callsign, spotter and grid square (prefix, or exact with the
+  `exact` checkbox), plus a substring search of spot comments and messages
+- **Period** — 1 h to the full retention window, or a custom UTC range
+- **Band, mode, source and continent** — one-click chips, populated from the
+  server's own whitelists at page load, so they are ready before the modal opens
+- **Country** — type-ahead over the DXCC list, added as removable chips
+- **Ranges** — SNR, frequency, distance, CW speed and UTC hour-of-day
+- **Sorting** — click any column header; a second click reverses it
+- **Paging** — **Load more** pages forward at constant cost, however deep you go
+- **⬇️ CSV** — the same query as a spreadsheet
+
+### Search API
+
+```
+GET /api/search
+```
+
+The search endpoint takes **every filter parameter the
+[Stats API](#stats-api) accepts** — they share one parser, so a filter that
+works on a chart works unchanged here — and adds ordering, paging, field
+selection and CSV output.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/search` | The parametric search itself |
+| `GET /api/search/meta` | Self-describing: every filter, sort key, field and limit, plus the band/mode/stream/country lists a UI needs |
+| `GET /api/search/facets` | Values actually present under the current filter (same as `/api/stats/facets`) |
+| `GET /api/search/docs` | The parameter reference above as plain text |
+
+**Result parameters** (in addition to every filter listed under [Stats API](#stats-api)):
+
+| Parameter | Meaning |
+|-----------|---------|
+| `sort` | `ts` (default), `freq`, `snr`, `distance`, `wpm`, `confidence`, `callsign`, `spotter`, `country`, `mode`, `locator` |
+| `order` | `asc` or `desc`; defaults to the sort key's natural direction (newest, strongest, furthest first) |
+| `limit` | Rows per page, 1–1000 (default 100) |
+| `offset` | Rows to skip, up to 100 000 — prefer `cursor` past the first few pages |
+| `cursor` | The previous response's `next_cursor`. Keyset paging: page 500 costs what page 1 costs. `sort=ts` only |
+| `count` | `capped` (default — stops counting at 100 000 and sets `total_capped`), `exact`, or `none` (cheapest) |
+| `fields` | Comma-separated subset of columns to return; omit for the whole spot |
+| `format` | `json` (default) or `csv` |
+
+Responses echo the resolved filter and search parameters, so a saved URL
+explains itself:
+
+```json
+{
+  "filter":  { "from": "…", "to": "…", "band": ["20m"], "mode": ["FT8"] },
+  "search":  { "sort": "snr", "order": "desc", "limit": 100, "count": "capped" },
+  "total": 4114, "total_capped": false, "returned": 100,
+  "has_more": true, "next_cursor": "MTc4…", "took_ms": 3,
+  "spots": [ … ]
+}
+```
+
+**Validation.** A value that is merely out of range is clamped and explained in
+a `warnings` array — asking for 50 000 rows returns 1000 and says so. A value
+that cannot mean anything is a `400` with a message naming the valid options:
+an unknown sort key, a malformed cursor, a `from` later than its `to`, or
+`cursor` and `offset` together. Only whitelisted identifiers ever reach the SQL,
+every value is bound as a parameter, and `%` or `_` typed into a text field
+stays literal.
+
+**Cost control.** Searches are bounded rather than rationed: the time window
+reaches back at most 400 days, a page is at most 1000 rows, the row count stops
+at 100 000, at most 8 searches run at once, and any single query is abandoned
+after 15 seconds with a `504` suggesting a narrower window. Paging with `cursor`
+seeks straight to the boundary through the timestamp index instead of counting
+past every skipped row — on a 120 000-spot database that is the difference
+between 1 ms and 217 ms at page 1000.
+
+**Example** — the strongest German FT8 signals on 40m this week:
+
+```
+GET /api/search?days=7&band=40m&mode=FT8&country_code=DE&sort=snr&order=desc
+```
+
+**Example** — everything heard from one station this month, as a spreadsheet:
+
+```
+GET /api/search?days=30&callsign_exact=G3ABC&sort=ts&order=asc&format=csv
+```
+
+**Example** — long-haul CW on the grey line, furthest first:
+
+```
+GET /api/search?days=30&mode=CW&dist_min=5000&hour_min=3&hour_max=6&sort=distance
+```
+
+**Example** — page a large result set at constant cost:
+
+```
+GET /api/search?days=30&band=20m&limit=500&count=none
+GET /api/search?days=30&band=20m&limit=500&count=none&cursor=<next_cursor>
+```
 
 ---
 
@@ -586,6 +701,10 @@ The web server exposes the following HTTP endpoints (all accessible through the 
 | `GET /api/status` | JSON status: uptime, telnet client count and list, available streams |
 | `GET /api/help` | Plain-text telnet command reference |
 | `GET /api/countries` | JSON list of DXCC countries (for the web UI country filter) |
+| `GET /api/search` | Parametric search over the spot archive — see [Search API](#search-api) |
+| `GET /api/search/meta` | Self-describing filter, sort, field and limit reference for `/api/search` |
+| `GET /api/search/facets` | Values present under a given search filter |
+| `GET /api/search/docs` | Plain-text parameter reference for `/api/search` |
 | `GET /stats` | Statistics dashboard (HTML) |
 | `GET /api/stats/*` | Analytics API — see [Stats API](#stats-api) |
 | `GET /clients/dxcluster` | Desktop client binary (Linux) |

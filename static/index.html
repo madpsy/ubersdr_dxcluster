@@ -10,6 +10,10 @@
     window.RX_NAME      = "{{.Name}}";
     window.RX_LOCATION  = "{{.Location}}";
     window.TELNET_ADDR  = "{{.TelnetAddr}}";
+    // Bands, modes, sources, continents, sort keys and limits, straight from
+    // the server's own whitelists. Injected rather than fetched so the search
+    // modal's pickers are already populated the first time it opens.
+    window.SEARCH_META  = {{.SearchMeta}};
   </script>
   <link rel="stylesheet" href="{{.BasePath}}/static/fonts/fonts.css">
   <link rel="stylesheet" href="{{.BasePath}}/static/style.css">
@@ -76,6 +80,8 @@
   <div class="conn-pill disconnected" id="conn-dx">
     <span>DX</span>
   </div>
+  <button class="conn-pill hdr-download hdr-btn" onclick="openSearchModal()"
+     title="Search the spot archive (press / or Ctrl-K)">🔎 Search</button>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/stats"
      title="Spot statistics and propagation analysis">📊 Stats</a>
   <a class="conn-pill hdr-download" href="{{.BasePath}}/client/download"
@@ -349,6 +355,141 @@
 
 </div>
 
+<!-- ── Search Modal ────────────────────────────────────────────────────── -->
+<div id="search-overlay" onclick="if(event.target===this)closeSearchModal()">
+  <div id="search-modal">
+
+    <div id="search-hdr">
+      <span>🔎</span> Search Spots
+      <span class="search-hdr-note" id="search-window-note"></span>
+      <button class="search-hdr-btn" onclick="copySearchApiUrl()"
+              title="Copy the /api/search URL for this exact query">🔗 API URL</button>
+      <button class="search-hdr-btn" onclick="downloadSearchCsv()"
+              title="Download these results as CSV">⬇️ CSV</button>
+      <button class="search-hdr-btn" onclick="resetSearch()" title="Clear every filter">Reset</button>
+      <button id="search-close" onclick="closeSearchModal()">×</button>
+    </div>
+
+    <div id="search-form">
+
+      <!-- Free-text row: the fields you type rather than pick -->
+      <div class="sf-row sf-row-text">
+        <label class="sf-field">
+          <span class="sf-label">Callsign</span>
+          <input id="sq-callsign" type="search" placeholder="DL, G3ABC…" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="sf-check sf-check-inline" title="Match the whole callsign, not just the start">
+          <input type="checkbox" id="sq-callsign-exact"><span>exact</span>
+        </label>
+        <label class="sf-field">
+          <span class="sf-label">Spotter</span>
+          <input id="sq-spotter" type="search" placeholder="prefix" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="sf-check sf-check-inline">
+          <input type="checkbox" id="sq-spotter-exact"><span>exact</span>
+        </label>
+        <label class="sf-field">
+          <span class="sf-label">Grid</span>
+          <input id="sq-locator" type="search" placeholder="IO91" maxlength="6" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="sf-field sf-grow">
+          <span class="sf-label">Comment / message contains</span>
+          <input id="sq-text" type="search" placeholder="CQ DX, POTA…" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+
+      <!-- Period -->
+      <div class="sf-row">
+        <span class="sf-label sf-label-lead">Period</span>
+        <div class="sf-chips" id="sq-period"></div>
+        <span class="sf-custom-range" id="sq-custom-range" hidden>
+          <input id="sq-from" type="datetime-local" title="Window start (UTC)">
+          <span class="sf-arrow">→</span>
+          <input id="sq-to" type="datetime-local" title="Window end (UTC)">
+        </span>
+      </div>
+
+      <!-- Fixed-value pickers, populated from window.SEARCH_META -->
+      <div class="sf-row"><span class="sf-label sf-label-lead">Band</span><div class="sf-chips" id="sq-band"></div></div>
+      <div class="sf-row"><span class="sf-label sf-label-lead">Mode</span><div class="sf-chips" id="sq-mode"></div></div>
+      <div class="sf-row"><span class="sf-label sf-label-lead">Source</span><div class="sf-chips" id="sq-stream"></div></div>
+      <div class="sf-row"><span class="sf-label sf-label-lead">Continent</span><div class="sf-chips" id="sq-continent"></div></div>
+
+      <div class="sf-row">
+        <label class="sf-field">
+          <span class="sf-label">Country</span>
+          <input id="sq-country" type="search" list="sq-country-list"
+                 placeholder="Start typing a country…" autocomplete="off">
+          <datalist id="sq-country-list"></datalist>
+        </label>
+        <div class="sf-chips" id="sq-country-chips"></div>
+      </div>
+
+      <!-- Numeric ranges -->
+      <div class="sf-row sf-row-ranges">
+        <span class="sf-range"><span class="sf-label">SNR dB</span>
+          <input id="sq-snr-min" type="number" step="1" placeholder="min">
+          <span class="sf-arrow">–</span>
+          <input id="sq-snr-max" type="number" step="1" placeholder="max"></span>
+        <span class="sf-range"><span class="sf-label">Freq kHz</span>
+          <input id="sq-freq-min" type="number" step="0.1" placeholder="min">
+          <span class="sf-arrow">–</span>
+          <input id="sq-freq-max" type="number" step="0.1" placeholder="max"></span>
+        <span class="sf-range"><span class="sf-label">Distance km</span>
+          <input id="sq-dist-min" type="number" step="10" min="0" placeholder="min">
+          <span class="sf-arrow">–</span>
+          <input id="sq-dist-max" type="number" step="10" min="0" placeholder="max"></span>
+        <span class="sf-range"><span class="sf-label">CW wpm</span>
+          <input id="sq-wpm-min" type="number" step="1" min="0" placeholder="min">
+          <span class="sf-arrow">–</span>
+          <input id="sq-wpm-max" type="number" step="1" min="0" placeholder="max"></span>
+        <span class="sf-range"><span class="sf-label">UTC hour</span>
+          <input id="sq-hour-min" type="number" step="1" min="0" max="23" placeholder="0">
+          <span class="sf-arrow">–</span>
+          <input id="sq-hour-max" type="number" step="1" min="0" max="23" placeholder="23"></span>
+      </div>
+
+      <!-- Result shaping -->
+      <div class="sf-row sf-row-result">
+        <label class="sf-field"><span class="sf-label">Sort by</span>
+          <select id="sq-sort"></select></label>
+        <label class="sf-field"><span class="sf-label">Order</span>
+          <select id="sq-order">
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select></label>
+        <label class="sf-field"><span class="sf-label">Rows</span>
+          <select id="sq-limit">
+            <option>50</option><option selected>100</option>
+            <option>250</option><option>500</option><option>1000</option>
+          </select></label>
+        <span class="sf-spacer"></span>
+        <button id="sq-run" class="sf-run-btn" onclick="runSearch()">Search</button>
+      </div>
+    </div>
+
+    <div id="search-status">
+      <span id="search-summary">Set a filter and press Search — or just search the last 24 hours.</span>
+      <span id="search-timing"></span>
+    </div>
+
+    <div id="search-results">
+      <table>
+        <thead><tr id="search-head"></tr></thead>
+        <tbody id="search-tbody">
+          <tr><td colspan="11" class="no-data">No search run yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="search-footer">
+      <button id="search-more" class="sf-run-btn" onclick="loadMoreSearch()" hidden>Load more</button>
+      <span id="search-footer-note"></span>
+    </div>
+
+  </div>
+</div>
+
 <!-- ── Web Terminal Modal ──────────────────────────────────────────────── -->
 <div id="term-overlay" class="term-overlay" style="display:none">
   <div id="term-modal" class="term-modal">
@@ -419,6 +560,7 @@
 </div>
 
 <script src="{{.BasePath}}/static/app.js"></script>
+<script src="{{.BasePath}}/static/search.js"></script>
 <script src="{{.BasePath}}/static/terminal.js"></script>
 </body>
 </html>
