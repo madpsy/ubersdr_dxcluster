@@ -338,6 +338,7 @@ func (t *TelnetServer) handleShowStatus() string {
 		string(StreamDecoder):       "Digital (FT8/FT4/WSPR)",
 		string(StreamCWSkimmer):     "CW Skimmer",
 		string(StreamVoiceActivity): "Voice Activity",
+		string(StreamSSTV):          "SSTV",
 		string(StreamDXCluster):     "DX Cluster",
 	}
 	for _, sc := range streams {

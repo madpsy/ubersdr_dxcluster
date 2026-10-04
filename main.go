@@ -40,6 +40,9 @@ type descriptionResponse struct {
 		MinFrequency float64 `json:"min_frequency"`
 		MaxFrequency float64 `json:"max_frequency"`
 	} `json:"tuning_range"`
+
+	// Addons names the addon proxies enabled on the receiver.
+	Addons []string `json:"addons"`
 }
 
 // CountryEntry is one entry from /api/cty/countries.
@@ -138,6 +141,7 @@ func fetchDescription(baseURL string) (ReceiverInfo, error) {
 		rx.TuneMinHz = tr.MinFrequency
 		rx.TuneMaxHz = tr.MaxFrequency
 	}
+	rx.Addons = d.Addons
 	return rx, nil
 }
 
@@ -169,6 +173,7 @@ func main() {
 	requireLogin := flag.Bool("require-login", true, "Require a valid callsign login on telnet connect (default: true)")
 	dataDir := flag.String("data-dir", "", "Directory for persistent data (SQLite DB). Defaults to DATA_DIR env var or /data")
 	retentionDays := flag.Int("retention-days", 0, "Days of spot history to retain. Defaults to RETENTION_DAYS env var or 30")
+	sstvURL := flag.String("sstv-url", "http://sstv:6091", "Base URL of the SSTV addon, used when the receiver lists it as enabled")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -215,6 +220,16 @@ func main() {
 			decoderDedupMins = n
 		} else {
 			log.Printf("invalid DECODER_DEDUP_MINS=%q — using default 5", v)
+		}
+	}
+
+	// Resolve SSTV spot dedup window: SSTV_DEDUP_MINS env var > default (10)
+	sstvDedupMins := 10
+	if v := os.Getenv("SSTV_DEDUP_MINS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			sstvDedupMins = n
+		} else {
+			log.Printf("invalid SSTV_DEDUP_MINS=%q — using default 10", v)
 		}
 	}
 
@@ -295,6 +310,24 @@ func main() {
 			formatKHz(spotMin), formatKHz(spotMax))
 	}
 
+	// SSTV spots come from the SSTV addon, which is optional. Its feed is only
+	// consumed when the receiver lists the addon as enabled; the consumer then
+	// reconnects like the others, so it does not matter which starts first.
+	sstvFeed := ""
+	switch {
+	case !rx.HasAddon("sstv"):
+		log.Printf("  sstv     : SSTV addon not enabled on this receiver — SSTV spots disabled")
+	case *sstvURL == "":
+		log.Printf("  sstv     : disabled (-sstv-url is empty)")
+	default:
+		sstvFeed = *sstvURL
+		if sstvDedupMins > 0 {
+			log.Printf("  sstv     : %s (one spot per callsign per band per %d min)", sstvFeed, sstvDedupMins)
+		} else {
+			log.Printf("  sstv     : %s (dedup disabled)", sstvFeed)
+		}
+	}
+
 	hub := NewHub(store)
 	go hub.Run()
 
@@ -302,7 +335,7 @@ func main() {
 	defer cancel()
 
 	// Start upstream SSE consumers
-	StartConsumers(ctx, *ubersdrURL, hub)
+	StartConsumers(ctx, *ubersdrURL, sstvFeed, time.Duration(sstvDedupMins)*time.Minute, hub)
 
 	// Start telnet DX cluster server
 	telnet := NewTelnetServer(*telnetListen, hub, store, callsign, rx,

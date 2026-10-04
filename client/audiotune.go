@@ -79,6 +79,16 @@ func modeFromSpotLine(freqKHz float64, comment string) string {
 		return "lsb"
 	}
 
+	// SSTV: "SSTV <picture mode> <N> dB". Checked before the digital pattern,
+	// which a bare "SSTV <N> dB" would match. Sideband by the same band-plan
+	// convention as voice: LSB below 10 MHz, USB above.
+	if strings.HasPrefix(upper, "SSTV") {
+		if freqHz >= 10_000_000 {
+			return "usb"
+		}
+		return "lsb"
+	}
+
 	// Digital decoder spots: "<MODE> <N> dB" pattern — skip silently.
 	// Catches FT8, FT4, FT2, WSPR, JS8, JT65, Q65, FST4W, MSK144, etc.
 	// without needing an explicit mode name list.

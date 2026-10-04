@@ -1684,6 +1684,7 @@ func (u *appUI) showSpotContextMenu(call string, freqKHz float64, band string, p
 		{"Digital", "set/digital", "unset/digital"},
 		{"CW/RBN", "set/rbn", "unset/rbn"},
 		{"Voice", "set/voice", "unset/voice"},
+		{"SSTV", "set/sstv", "unset/sstv"},
 		{"DX Cluster", "set/dxcluster", "unset/dxcluster"},
 	}
 	var enableItems, disableItems []*fyne.MenuItem

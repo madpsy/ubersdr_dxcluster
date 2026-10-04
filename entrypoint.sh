@@ -8,6 +8,8 @@
 #   SPOTTER_CALL    Callsign shown as spotter for digital/voice spots
 #                   (default: fetched from /api/description at startup —
 #                   startup waits, retrying every 5s, until that succeeds)
+#   SSTV_URL        SSTV addon base URL (default: http://sstv:6091). Used only
+#                   when the receiver lists the sstv addon as enabled.
 #   REQUIRE_LOGIN   Require a valid callsign on telnet connect (default: true)
 #                   Set to "false" or "0" to allow anonymous connections
 #
@@ -20,6 +22,7 @@ args=""
 
 [ -n "$UBERSDR_URL"  ] && args="$args -url $UBERSDR_URL"
 [ -n "$SPOTTER_CALL" ] && args="$args -spotter $SPOTTER_CALL"
+[ -n "$SSTV_URL"     ] && args="$args -sstv-url $SSTV_URL"
 
 # REQUIRE_LOGIN: pass -require-login=false if explicitly disabled
 if [ "$REQUIRE_LOGIN" = "false" ] || [ "$REQUIRE_LOGIN" = "0" ]; then

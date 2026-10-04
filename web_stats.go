@@ -91,7 +91,7 @@ func (w *WebServer) handleStatsMeta(rw http.ResponseWriter, r *http.Request) {
 		"buckets":    []string{"hour", "day", "week"},
 		"streams": []string{
 			string(StreamDecoder), string(StreamCWSkimmer),
-			string(StreamVoiceActivity), string(StreamDXCluster), string(StreamLocalSpot),
+			string(StreamVoiceActivity), string(StreamSSTV), string(StreamDXCluster), string(StreamLocalSpot),
 		},
 		// The modes this cluster can produce, grouped by source. The UI offers
 		// these regardless of whether the current window happens to contain

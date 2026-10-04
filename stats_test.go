@@ -511,13 +511,14 @@ func TestBucketLabelsCap(t *testing.T) {
 // grouping must stay in a stable presentation order.
 func TestModeGroupsCoverEveryStream(t *testing.T) {
 	groups := ModeGroups()
-	if len(groups) != 3 {
-		t.Fatalf("got %d mode groups, want 3 (digital, CW, voice)", len(groups))
+	if len(groups) != 4 {
+		t.Fatalf("got %d mode groups, want 4 (digital, CW, voice, SSTV)", len(groups))
 	}
 	if groups[0]["stream"] != string(StreamDecoder) ||
 		groups[1]["stream"] != string(StreamCWSkimmer) ||
-		groups[2]["stream"] != string(StreamVoiceActivity) {
-		t.Errorf("group order = %v, want decoder, cwskimmer, voice", groups)
+		groups[2]["stream"] != string(StreamVoiceActivity) ||
+		groups[3]["stream"] != string(StreamSSTV) {
+		t.Errorf("group order = %v, want decoder, cwskimmer, voice, sstv", groups)
 	}
 
 	digital, _ := groups[0]["modes"].([]string)

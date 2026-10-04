@@ -151,6 +151,8 @@ Edit `~/ubersdr/dxcluster/docker-compose.yml` and set the environment variables 
 | `RETENTION_DAYS`      | `30`                       | Days of spot history to keep. Older spots are purged daily and the database is compacted. |
 | `VOICE_DEDUP_MINS`    | `10`                       | Deduplication window (minutes) for voice spots stored to the database. Prevents the same signal being stored repeatedly. Set to `0` to disable. Real-time streaming is unaffected. |
 | `DECODER_DEDUP_MINS`  | `5`                        | Deduplication window (minutes) for digital decoder spots stored to the database. Set to `0` to disable. |
+| `SSTV_URL`            | `http://sstv:6091`         | Base URL of the SSTV add-on. Pictures whose sender appended an FSK ID become SSTV spots. Used only when the receiver's `/api/description` lists the `sstv` add-on as enabled; otherwise SSTV spots are off and nothing connects. |
+| `SSTV_DEDUP_MINS`     | `10`                       | A callsign is spotted from SSTV at most once per band in this many minutes (a station often sends several pictures in a row). Applies to the live feed as well as the database. Set to `0` to disable. |
 | `WS_MAX_CONNS`        | `25`                       | Maximum simultaneous WebSocket terminal sessions across all IPs. |
 | `WS_MAX_CONNS_PER_IP` | `2`                        | Maximum simultaneous WebSocket terminal sessions from a single IP address. |
 
@@ -517,7 +519,7 @@ These filters are AND-combined. Multiple values within a field are OR-combined.
 |---------|-------------|
 | `set/filter band <bands>` | Filter by band, e.g. `set/filter band 20m` or `set/filter band 40m,20m,15m` |
 | `set/filter mode <modes>` | Filter by mode: `FT8 FT4 WSPR JS8 FT2 CW USB LSB` |
-| `set/filter type <types>` | Filter by stream type: `digital cw voice dx` |
+| `set/filter type <types>` | Filter by stream type: `digital cw voice sstv dx` |
 | `set/filter cont <codes>` | Filter by continent: `EU NA SA AF AS OC AN` |
 | `set/filter country <codes>` | Filter by ISO 3166-1 alpha-2 country code, e.g. `DE,PA,ON` |
 | `set/filter call <prefixes>` | Filter by callsign prefix, e.g. `DL,VK,ZL` |
@@ -547,6 +549,7 @@ Filter expression fields: `on <band/freq>`, `call <prefix>`, `by <spotter>`, `co
 | `set/digital` / `unset/digital` | Enable/disable digital decoder spots (FT8/FT4/WSPR/JS8) — default **off** |
 | `set/rbn` / `unset/rbn` | Enable/disable CW/RBN skimmer spots — default **on** |
 | `set/voice` / `unset/voice` | Enable/disable voice activity spots — default **on** |
+| `set/sstv` / `unset/sstv` | Enable/disable SSTV FSK ID spots — default **on** |
 | `set/dxcluster` / `unset/dxcluster` | Enable/disable upstream DX cluster spots — default **off** |
 | `set/dx` / `unset/dx` | Enable/disable ALL spots |
 

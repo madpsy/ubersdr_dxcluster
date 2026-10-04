@@ -727,6 +727,7 @@ type ClientState struct {
 	WantRBN       bool // receive CW/RBN spots
 	WantVoice     bool // receive voice activity spots
 	WantDXCluster bool // receive DX cluster spots
+	WantSSTV      bool // receive SSTV FSK ID spots
 	Name          string
 	CanSpot       bool // true after successful SET/SPOTPASS authentication
 }
@@ -738,6 +739,7 @@ func newClientState() *ClientState {
 		WantRBN:       true,
 		WantVoice:     true,
 		WantDXCluster: false, // disabled by default — user must enable with set/dxcluster
+		WantSSTV:      true,
 	}
 }
 
@@ -761,6 +763,10 @@ func (s *ClientState) ShouldSend(spot Spot) bool {
 		}
 	case StreamDXCluster:
 		if !s.WantDXCluster {
+			return false
+		}
+	case StreamSSTV:
+		if !s.WantSSTV {
 			return false
 		}
 	}
@@ -811,6 +817,8 @@ func parseTypes(vals []string) []StreamType {
 			out = append(out, StreamVoiceActivity)
 		case "dx", "dxcluster", "cluster":
 			out = append(out, StreamDXCluster)
+		case "sstv":
+			out = append(out, StreamSSTV)
 		}
 	}
 	return out

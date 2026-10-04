@@ -69,6 +69,18 @@ type ReceiverInfo struct {
 	// back to the built-in spotMinKHz/spotMaxKHz defaults.
 	TuneMinHz float64
 	TuneMaxHz float64
+	// Addons names the addon proxies enabled on the receiver.
+	Addons []string
+}
+
+// HasAddon reports whether the receiver lists the named addon as enabled.
+func (rx ReceiverInfo) HasAddon(name string) bool {
+	for _, a := range rx.Addons {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 func NewWebServer(addr, telnetAddr string, rx ReceiverInfo, countries []CountryEntry, telnet *TelnetServer, hub *Hub, store *SpotStore, wsMaxConns, wsMaxConnsPerIP int) (*WebServer, error) {
@@ -394,6 +406,7 @@ func (w *WebServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 			string(StreamDecoder),
 			string(StreamCWSkimmer),
 			string(StreamVoiceActivity),
+			string(StreamSSTV),
 			string(StreamDXCluster),
 		},
 	})

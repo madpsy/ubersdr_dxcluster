@@ -40,6 +40,14 @@ services:
       # more than once per window. Real-time streaming is unaffected.
       # DECODER_DEDUP_MINS: "5"
       #
+      # SSTV add-on base URL. Pictures carrying an FSK ID callsign become SSTV
+      # spots. Used only when the receiver lists the sstv add-on as enabled.
+      # SSTV_URL: "http://sstv:6091"
+      #
+      # SSTV spot dedup window in minutes (default: 10, 0 to disable): one spot
+      # per callsign per band per window, live feed included.
+      # SSTV_DEDUP_MINS: "10"
+      #
       # Maximum simultaneous web-terminal (WebSocket) sessions across all IPs (default: 25)
       # WS_MAX_CONNS: "25"
       #

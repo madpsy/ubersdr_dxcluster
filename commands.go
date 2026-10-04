@@ -211,6 +211,13 @@ func (t *TelnetServer) handleCommand(line string, state *ClientState) string {
 		state.WantVoice = false
 		return "Voice activity spots disabled."
 
+	case "set/sstv":
+		state.WantSSTV = true
+		return "SSTV spots enabled."
+	case "unset/sstv":
+		state.WantSSTV = false
+		return "SSTV spots disabled."
+
 	case "set/dxcluster", "set/cluster":
 		state.WantDXCluster = true
 		return "DX cluster spots enabled."
@@ -757,6 +764,8 @@ func (t *TelnetServer) handleShowDX(args []string, state *ClientState) string {
 					p.Stream = string(StreamVoiceActivity)
 				case "dx", "dxcluster", "cluster":
 					p.Stream = string(StreamDXCluster)
+				case "sstv":
+					p.Stream = string(StreamSSTV)
 				default:
 					p.Stream = next
 				}

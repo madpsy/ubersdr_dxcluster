@@ -303,7 +303,7 @@ func SearchUIMeta() map[string]any {
 		"bands": bands,
 		"streams": []string{
 			string(StreamDecoder), string(StreamCWSkimmer),
-			string(StreamVoiceActivity), string(StreamDXCluster), string(StreamLocalSpot),
+			string(StreamVoiceActivity), string(StreamSSTV), string(StreamDXCluster), string(StreamLocalSpot),
 		},
 		"stream_labels": StreamLabelMap(),
 		"mode_groups":   ModeGroups(),

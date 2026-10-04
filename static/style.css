@@ -347,6 +347,7 @@ tbody tr.new-row-all { animation: row-flash-all 0.9s ease-out; }
 .type-cw      { background: rgba(245,200,66,0.15);  color: var(--gold);   }
 .type-voice   { background: rgba(34,211,160,0.15);  color: var(--green);  }
 .type-dx      { background: rgba(255,77,109,0.15);  color: var(--red);    }
+.type-sstv    { background: rgba(167,139,250,0.15); color: var(--purple); }
 
 tbody tr.stale { opacity: 0.45; }
 

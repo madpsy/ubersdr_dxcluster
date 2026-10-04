@@ -20,6 +20,9 @@ const (
 	// locally submitted spots are delivered to ALL connected clients regardless
 	// of their stream preferences — they are always relevant to the cluster.
 	StreamLocalSpot StreamType = "localspot"
+	// StreamSSTV is SSTV pictures whose sender appended an FSK ID callsign,
+	// read from the SSTV addon's gallery feed (see sstv.go).
+	StreamSSTV StreamType = "sstv"
 )
 
 // StreamModes lists the mode values each upstream stream can produce. It is the
@@ -36,6 +39,7 @@ var StreamModes = map[StreamType][]string{
 	StreamVoiceActivity: {"USB", "LSB"},
 	StreamDXCluster:     {},
 	StreamLocalSpot:     {},
+	StreamSSTV:          {"SSTV"},
 }
 
 // StreamLabels are the human-readable names for each stream, matching the pills
@@ -46,12 +50,13 @@ var StreamLabels = map[StreamType]string{
 	StreamVoiceActivity: "Voice",
 	StreamDXCluster:     "DX cluster",
 	StreamLocalSpot:     "Local spots",
+	StreamSSTV:          "SSTV",
 }
 
 // streamOrder fixes the order streams are presented in, so the mode picker
 // always groups Digital → CW → Voice rather than in map iteration order.
 var streamOrder = []StreamType{
-	StreamDecoder, StreamCWSkimmer, StreamVoiceActivity, StreamDXCluster, StreamLocalSpot,
+	StreamDecoder, StreamCWSkimmer, StreamVoiceActivity, StreamSSTV, StreamDXCluster, StreamLocalSpot,
 }
 
 // StreamLabelMap returns the stream key → display name map, for UIs that group
@@ -165,6 +170,8 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, s.Comment)
 	case StreamVoiceActivity:
 		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
+	case StreamSSTV:
+		comment = fmt.Sprintf("%s %d dB", s.Comment, int(s.SNR))
 	case StreamDXCluster, StreamLocalSpot:
 		// Strip any trailing HHMMZ timestamp from the comment — the upstream
 		// cluster sometimes includes it in the comment field, but we already

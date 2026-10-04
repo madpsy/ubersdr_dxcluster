@@ -167,10 +167,11 @@ document.addEventListener('DOMContentLoaded', () => {
     pollStatus();
     setInterval(pollStatus, 10_000);
 
-  // Load history for all four panels
+  // Load history for each stream (SSTV feeds only the combined panel)
   loadHistory('decoder');
   loadHistory('cwskimmer');
   loadHistory('voice');
+  loadHistory('sstv');
   loadHistory('dxcluster');
 
   // Periodically age out stale voice entries
@@ -372,6 +373,7 @@ const STREAM_LABELS = {
   decoder:   { label: 'Digital', cls: 'type-digital' },
   cwskimmer: { label: 'CW',      cls: 'type-cw'      },
   voice:     { label: 'Voice',   cls: 'type-voice'   },
+  sstv:      { label: 'SSTV',    cls: 'type-sstv'    },
   dxcluster: { label: 'DX',      cls: 'type-dx'      },
   localspot: { label: 'DX',      cls: 'type-dx'      }, // user-submitted spots
 };
@@ -496,6 +498,7 @@ const STREAM_MODES = {
   decoder:   ['FT8','FT4','WSPR','JS8','FT2'],
   cwskimmer: ['CW'],
   voice:     ['USB','LSB'],
+  sstv:      ['SSTV'],
   dxcluster: [],   // no mode field
 };
 
@@ -505,7 +508,7 @@ function getCheckedModes() {
     'f-mode-wspr': 'WSPR', 'f-mode-js8':  'JS8',
     'f-mode-ft2':  'FT2',
     'f-mode-cw':   'CW',   'f-mode-usb':  'USB',
-    'f-mode-lsb':  'LSB',
+    'f-mode-lsb':  'LSB',  'f-mode-sstv': 'SSTV',
   };
   const checked = new Set();
   for (const [id, mode] of Object.entries(map)) {
@@ -535,6 +538,7 @@ function rowMatchesFilter(tr) {
   const showCW      = document.getElementById('f-type-cw')?.checked      ?? true;
   const showVoice   = document.getElementById('f-type-voice')?.checked    ?? true;
   const showDX      = document.getElementById('f-type-dx')?.checked       ?? true;
+  const showSSTV    = document.getElementById('f-type-sstv')?.checked     ?? true;
 
   const checkedModes = getCheckedModes();
   const bands        = getSelectedOptions('f-band');
@@ -563,6 +567,7 @@ function rowMatchesFilter(tr) {
   if (stream === 'cwskimmer' && !showCW)      return false;
   if (stream === 'voice'     && !showVoice)   return false;
   if (stream === 'dxcluster' && !showDX)      return false;
+  if (stream === 'sstv'      && !showSSTV)    return false;
 
   // Mode filter — only applies if the stream has modes
   if (STREAM_MODES[stream] && STREAM_MODES[stream].length > 0) {
@@ -614,13 +619,13 @@ function onSnrMaxChange() {
 
 function clearAllFilters() {
   // Reset stream toggles — digital and DX are off by default
-  const streamDefaults = { 'f-type-digital': false, 'f-type-cw': true, 'f-type-voice': true, 'f-type-dx': false };
+  const streamDefaults = { 'f-type-digital': false, 'f-type-cw': true, 'f-type-voice': true, 'f-type-sstv': true, 'f-type-dx': false };
   for (const [id, def] of Object.entries(streamDefaults)) {
     const el = document.getElementById(id);
     if (el) el.checked = def;
   }
   // Reset mode checkboxes
-  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-ft2','f-mode-cw','f-mode-usb','f-mode-lsb'].forEach(id => {
+  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-ft2','f-mode-cw','f-mode-usb','f-mode-lsb','f-mode-sstv'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.checked = true;
   });
@@ -962,6 +967,7 @@ function showSpotMenu(e, d) {
     ['Digital', 'set/digital',    'unset/digital'],
     ['CW/RBN',  'set/rbn',        'unset/rbn'],
     ['Voice',   'set/voice',      'unset/voice'],
+    ['SSTV',    'set/sstv',       'unset/sstv'],
     ['DX Cluster', 'set/dxcluster', 'unset/dxcluster'],
   ];
 

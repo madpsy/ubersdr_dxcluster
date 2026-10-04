@@ -19,10 +19,11 @@ SIMPLE FILTERS  (AND-combined; multiple values within a field are OR-combined)
                                   Digital: FT8 FT4 WSPR JS8 FT2
                                   CW:      CW
                                   Voice:   USB LSB
+                                  SSTV:    SSTV
                                   e.g. set/filter mode FT8,FT4,WSPR
 
   set/filter type <types>       Filter by activity type (comma-separated)
-                                  Types: digital  cw  voice  dx
+                                  Types: digital  cw  voice  sstv  dx
                                   e.g. set/filter type cw,digital
 
   set/filter cont <conts>       Filter by continent (comma-separated)
@@ -69,7 +70,7 @@ DX SPIDER ACCEPT/REJECT FILTERS  (numbered slots 0-9, default slot 1)
     cont <code>                 Continent, e.g. cont EU,NA
     country <code>              Country code, e.g. country DE
     mode <mode>                 Mode, e.g. mode FT8,FT4
-    type <type>                 Stream type: digital cw voice dx
+    type <type>                 Stream type: digital cw voice sstv dx
     info <text>                 Comment/message substring
     iota                        IOTA spots
     qsl                         QSL/VIA spots
@@ -139,6 +140,9 @@ SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/voice                     Enable voice activity spots (default: on)
   unset/voice                   Disable voice activity spots
 
+  set/sstv                      Enable SSTV FSK ID spots (default: on)
+  unset/sstv                    Disable SSTV FSK ID spots
+
   set/dxcluster                 Enable DX cluster spots (default: off)
   unset/dxcluster               Disable DX cluster spots
   set/cluster                   Alias for set/dxcluster
@@ -164,7 +168,7 @@ INFORMATION
       cont <code>                 Filter by continent, e.g. cont EU
       country <code>              Filter by country code, e.g. country DE
       mode <mode>                 Filter by mode, e.g. mode FT8
-      type <type>                 Filter by stream type: digital cw voice dx
+      type <type>                 Filter by stream type: digital cw voice sstv dx
     Examples:
       show/dx
       show/dx 5

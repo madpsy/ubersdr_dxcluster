@@ -20,11 +20,20 @@ type StreamConfig struct {
 	Path   string // e.g. /api/decoder/stream
 	Parse  func([]byte) (*Spot, error)
 	Stream StreamType
+	// BaseURL overrides the UberSDR base URL, for streams served by another
+	// addon (the SSTV addon's gallery feed).
+	BaseURL string
+	// Event, when set, keeps only SSE events with this "event:" name. Streams
+	// that send just "data:" lines leave it empty.
+	Event string
 }
 
 // StartConsumers launches one goroutine per upstream SSE stream.
 // Each goroutine reconnects with exponential back-off on failure.
-func StartConsumers(ctx context.Context, baseURL string, hub *Hub) {
+// sstvURL is the SSTV addon's base URL; empty disables the SSTV stream. The
+// caller passes it only when the receiver lists the addon as enabled, so a
+// receiver without it never has a consumer retrying a host that isn't there.
+func StartConsumers(ctx context.Context, baseURL, sstvURL string, sstvDedup time.Duration, hub *Hub) {
 	streams := []StreamConfig{
 		{
 			Name:   "decoder",
@@ -51,6 +60,16 @@ func StartConsumers(ctx context.Context, baseURL string, hub *Hub) {
 			Stream: StreamDXCluster,
 		},
 	}
+	if sstvURL != "" {
+		streams = append(streams, StreamConfig{
+			Name:    "sstv",
+			Path:    "/api/live",
+			Parse:   newSSTVParser(baseURL, sstvDedup),
+			Stream:  StreamSSTV,
+			BaseURL: sstvURL,
+			Event:   "image",
+		})
+	}
 
 	for _, sc := range streams {
 		go consumeStream(ctx, baseURL, sc, hub)
@@ -59,6 +78,9 @@ func StartConsumers(ctx context.Context, baseURL string, hub *Hub) {
 
 func consumeStream(ctx context.Context, baseURL string, sc StreamConfig, hub *Hub) {
 	backoff := backoffMin
+	if sc.BaseURL != "" {
+		baseURL = sc.BaseURL
+	}
 	url := strings.TrimRight(baseURL, "/") + sc.Path
 
 	for {
@@ -117,7 +139,10 @@ func readStream(ctx context.Context, url string, sc StreamConfig, hub *Hub) erro
 	log.Printf("[%s] connected (HTTP %d)", sc.Name, resp.StatusCode)
 
 	scanner := bufio.NewScanner(resp.Body)
-	var dataLine string
+	// The SSTV feed's image records carry a per-image SNR series, which can
+	// run past bufio's 64 KiB default line limit.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var dataLine, eventName string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -126,17 +151,20 @@ func readStream(ctx context.Context, url string, sc StreamConfig, hub *Hub) erro
 		case strings.HasPrefix(line, "data:"):
 			dataLine = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
+		case strings.HasPrefix(line, "event:"):
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+
 		case line == "":
 			// Blank line = end of event; process accumulated data
-			if dataLine != "" {
+			if dataLine != "" && (sc.Event == "" || eventName == sc.Event) {
 				spot, err := sc.Parse([]byte(dataLine))
 				if err == nil && spot != nil {
 					hub.Publish(*spot)
 				}
-				dataLine = ""
 			}
+			dataLine, eventName = "", ""
 
-		// Ignore event:, id:, retry:, comment lines
+		// Ignore id:, retry:, comment lines
 		default:
 			dataLine = ""
 		}

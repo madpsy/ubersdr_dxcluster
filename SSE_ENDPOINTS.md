@@ -371,6 +371,33 @@ data: {"last_spot": "2026-07-04T15:00:00Z"}
 
 ---
 
+## 5. SSTV Add-on Feed (not UberSDR)
+
+```
+GET http://sstv:6091/api/live
+```
+
+Served by the SSTV add-on (`ubersdr_qsstv`), not UberSDR, so none of the
+connection rules above apply. dxcluster consumes it only when the receiver's
+`/api/description` lists `sstv` in `addons`; the base URL is `SSTV_URL`.
+
+The feed carries several named events (`image`, `delete`, `snr`, rail
+thumbnails). Only `event: image` is read: one per saved picture, with these
+fields used:
+
+| Field          | Type   | Description |
+|----------------|--------|-------------|
+| `callsign`     | string | FSK ID callsign sent after the picture; empty when the sender sent none (no spot) |
+| `frequency_hz` | int    | Channel dial frequency in Hz — the spot frequency |
+| `sstv_mode`    | string | Picture mode, e.g. `"Scottie 1"`, `"PD120"` |
+| `rx_end`       | string | RFC 3339 time the picture finished — the spot time |
+| `snr_avg_db`   | float  | Average SNR over the picture |
+
+A callsign that is not a valid callsign, or that UberSDR's CTY database can't
+place, is dropped. One spot per callsign per band per `SSTV_DEDUP_MINS`.
+
+---
+
 ## Connection Example (JavaScript)
 
 ```javascript
