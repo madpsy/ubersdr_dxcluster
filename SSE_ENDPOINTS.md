@@ -125,12 +125,13 @@ data: { ... }
 | Field          | Type    | Always present | Description |
 |----------------|---------|:--------------:|-------------|
 | `type`         | string  | ✓ | Always `"cw_spot"` |
+| `mode`         | string  | — | `CW`, `RTTY` or `JTTY`; absent from UberSDRs before it was added (their spots are CW) |
 | `band`         | string  | ✓ | Amateur band label, e.g. `"40m"` |
 | `frequency`    | float   | ✓ | Spot frequency in Hz |
 | `callsign`     | string  | ✓ | Spotted callsign |
 | `spotter`      | string  | ✓ | Callsign of the skimmer that produced the spot |
 | `snr`          | integer | ✓ | Signal-to-noise ratio in dB |
-| `wpm`          | integer | ✓ | Detected CW speed in words per minute |
+| `wpm`          | integer | ✓ | Speed: words per minute for CW, baud for RTTY and JTTY |
 | `timestamp`    | string  | ✓ | ISO 8601 UTC timestamp of the spot |
 | `comment`      | string  | — | Decoded CW comment (e.g. `"CQ"`) |
 | `country`      | string  | — | DXCC entity name |

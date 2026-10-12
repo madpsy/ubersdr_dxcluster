@@ -389,9 +389,10 @@ function onAllSpot(spot, live) {
   const flag    = spot.country_code ? countryFlag(spot.country_code) + ' ' : '';
   const country = spot.country ? flag + esc(spot.country) : '\u2014';
 
-  // Determine mode for filter matching
+  // Determine mode for filter matching: the skimmer stream's CW, RTTY or
+  // JTTY (CW for spots stored before it said which)
   let mode = spot.mode || '';
-  if (spot.stream === 'cwskimmer')  mode = 'CW';
+  if (spot.stream === 'cwskimmer')  mode = spot.mode || 'CW';
   if (spot.stream === 'voice')      mode = spot.voice_mode || spot.mode || '';
   // Band is already normalised server-side (e.g. "20m_FT8" → "20m")
 
@@ -496,7 +497,7 @@ function buildRow(fields) {
 // Stream type → mode values produced by that stream
 const STREAM_MODES = {
   decoder:   ['FT8','FT4','WSPR','JS8','FT2'],
-  cwskimmer: ['CW'],
+  cwskimmer: ['CW','RTTY','JTTY'],
   voice:     ['USB','LSB'],
   sstv:      ['SSTV'],
   dxcluster: [],   // no mode field
@@ -507,7 +508,8 @@ function getCheckedModes() {
     'f-mode-ft8':  'FT8',  'f-mode-ft4':  'FT4',
     'f-mode-wspr': 'WSPR', 'f-mode-js8':  'JS8',
     'f-mode-ft2':  'FT2',
-    'f-mode-cw':   'CW',   'f-mode-usb':  'USB',
+    'f-mode-cw':   'CW',   'f-mode-rtty': 'RTTY',
+    'f-mode-jtty': 'JTTY', 'f-mode-usb':  'USB',
     'f-mode-lsb':  'LSB',  'f-mode-sstv': 'SSTV',
   };
   const checked = new Set();
@@ -625,7 +627,7 @@ function clearAllFilters() {
     if (el) el.checked = def;
   }
   // Reset mode checkboxes
-  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-ft2','f-mode-cw','f-mode-usb','f-mode-lsb','f-mode-sstv'].forEach(id => {
+  ['f-mode-ft8','f-mode-ft4','f-mode-wspr','f-mode-js8','f-mode-ft2','f-mode-cw','f-mode-rtty','f-mode-jtty','f-mode-usb','f-mode-lsb','f-mode-sstv'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.checked = true;
   });
@@ -684,8 +686,10 @@ function onCW(spot, live) {
   if (hdrCW)   hdrCW.textContent   = countCW;
   if (badgeCW) badgeCW.textContent = countCW + ' spots';
 
-  // Info: WPM + spotter callsign
-  const wpm     = spot.wpm     ? spot.wpm + ' wpm'          : '';
+  // Info: speed (WPM for CW, baud for RTTY and JTTY) + spotter callsign
+  const mode    = spot.mode || 'CW';
+  const unit    = (mode === 'RTTY' || mode === 'JTTY') ? ' Bd' : ' wpm';
+  const wpm     = spot.wpm     ? spot.wpm + unit             : '';
   const spotter = spot.spotter ? 'de ' + esc(spot.spotter)  : '';
   const info    = [wpm, spotter].filter(Boolean).join(' ') || '\u2014';
 
@@ -695,7 +699,7 @@ function onCW(spot, live) {
     callsign_raw:  spot.callsign || '',
     freq_hz:       spot.freq_hz,
     band:          spot.band,
-    mode:          'CW',
+    mode:          mode,
     snr:           spot.snr,
     country:       spot.country,
     country_code:  spot.country_code,

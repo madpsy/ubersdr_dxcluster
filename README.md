@@ -312,15 +312,14 @@ Note the difference between **Source** and **Mode**: Source is which stream
 produced the spot (Digital decoder / CW skimmer / voice detector / upstream DX
 cluster), Mode is the modulation within it. The mode picker is grouped by source
 to make the relationship visible. Digital fans out into FT8, FT4, WSPR, JS8 and
-FT2, and Voice into USB and LSB — but the CW skimmer only ever decodes CW, so
-`source = CW` and `mode = CW` select the same spots today. They are not the same
-question: if a spot with mode CW ever arrived from another source, `mode=CW`
-would find it and `source=CW` would not. Upstream DX cluster spots carry no mode
+FT2, CW into CW, RTTY and JTTY (the skimmer's), and Voice into USB and LSB — so
+`source = CW` takes all three and `mode = CW` CW alone. CW skimmer spots stored
+before the stream said its mode have none, and count as CW. Upstream DX cluster spots carry no mode
 field at all, so they are reachable by source but never by mode.
 
 The **mode picker** is built from the cluster's own list of modes
 (`StreamModes` in `spot.go`, served via `/api/stats/meta`), grouped by the
-source that produces them — Digital (FT8, FT4, WSPR, JS8, FT2), CW, and Voice
+source that produces them — Digital (FT8, FT4, WSPR, JS8, FT2), CW (CW, RTTY, JTTY), and Voice
 (USB, LSB). Spot counts for the selected period are shown beside each mode, and
 a mode with none is still offered, greyed as `(0)`, rather than vanishing from
 the filter because it had a quiet week. Any mode present in the database but not
@@ -518,7 +517,7 @@ These filters are AND-combined. Multiple values within a field are OR-combined.
 | Command | Description |
 |---------|-------------|
 | `set/filter band <bands>` | Filter by band, e.g. `set/filter band 20m` or `set/filter band 40m,20m,15m` |
-| `set/filter mode <modes>` | Filter by mode: `FT8 FT4 WSPR JS8 FT2 CW USB LSB` |
+| `set/filter mode <modes>` | Filter by mode: `FT8 FT4 WSPR JS8 FT2 CW RTTY JTTY USB LSB SSTV` |
 | `set/filter type <types>` | Filter by stream type: `digital cw voice sstv dx` |
 | `set/filter cont <codes>` | Filter by continent: `EU NA SA AF AS OC AN` |
 | `set/filter country <codes>` | Filter by ISO 3166-1 alpha-2 country code, e.g. `DE,PA,ON` |

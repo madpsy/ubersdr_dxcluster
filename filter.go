@@ -270,8 +270,8 @@ func (n *exprNode) evalCond(s Spot) bool {
 		return containsCI(n.strVals, s.CountryCode)
 	case condMode:
 		spotMode := s.Mode
-		if s.Stream == StreamCWSkimmer {
-			spotMode = "CW"
+		if s.Stream == StreamCWSkimmer && spotMode == "" {
+			spotMode = "CW" // stored before the stream said its mode
 		} else if s.Stream == StreamVoiceActivity {
 			spotMode = s.VoiceMode
 		}
@@ -583,8 +583,8 @@ func (f *ClientFilter) matchSimple(s Spot) bool {
 	}
 	if len(f.Modes) > 0 {
 		spotMode := s.Mode
-		if s.Stream == StreamCWSkimmer {
-			spotMode = "CW"
+		if s.Stream == StreamCWSkimmer && spotMode == "" {
+			spotMode = "CW" // stored before the stream said its mode
 		} else if s.Stream == StreamVoiceActivity {
 			spotMode = s.VoiceMode
 		}

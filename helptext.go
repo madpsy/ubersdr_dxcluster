@@ -17,7 +17,7 @@ SIMPLE FILTERS  (AND-combined; multiple values within a field are OR-combined)
 
   set/filter mode <modes>       Filter by mode (comma-separated)
                                   Digital: FT8 FT4 WSPR JS8 FT2
-                                  CW:      CW
+                                  CW:      CW RTTY JTTY   (the CW skimmer's)
                                   Voice:   USB LSB
                                   SSTV:    SSTV
                                   e.g. set/filter mode FT8,FT4,WSPR
@@ -132,7 +132,7 @@ SPOT STREAM TOGGLES  (each stream can be enabled/disabled independently)
   set/digital                   Enable digital decoder spots (FT8/FT4/WSPR/JS8, default: off)
   unset/digital                 Disable digital decoder spots
 
-  set/rbn                       Enable CW/RBN skimmer spots (default: on)
+  set/rbn                       Enable CW/RBN skimmer spots: CW, RTTY, JTTY (default: on)
   unset/rbn                     Disable CW/RBN skimmer spots
   set/skimmer                   Alias for set/rbn
   unset/skimmer                 Alias for unset/rbn

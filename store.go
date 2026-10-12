@@ -444,7 +444,9 @@ func (s *SpotStore) Query(p ShowDXParams) ([]Spot, error) {
 		args = append(args, p.CountryName)
 	}
 	if p.Mode != "" {
-		where = append(where, "mode = ?")
+		// modeExpr (stats.go): CW skimmer rows stored before the stream said
+		// its mode (CW, RTTY or JTTY) have none, and are CW.
+		where = append(where, modeExpr+" = ?")
 		args = append(args, strings.ToUpper(p.Mode))
 	}
 	if p.Stream != "" {

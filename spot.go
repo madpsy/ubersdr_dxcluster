@@ -35,7 +35,7 @@ const (
 // comment rather than a mode field.
 var StreamModes = map[StreamType][]string{
 	StreamDecoder:       {"FT8", "FT4", "WSPR", "JS8", "FT2"},
-	StreamCWSkimmer:     {"CW"},
+	StreamCWSkimmer:     {"CW", "RTTY", "JTTY"},
 	StreamVoiceActivity: {"USB", "LSB"},
 	StreamDXCluster:     {},
 	StreamLocalSpot:     {},
@@ -135,6 +135,7 @@ type Spot struct {
 //
 //	DX de DK8MM:    144337.0  DM4KCS/P     JO53 > JO30JM                  1748Z
 //	DX de M9PSY-#:   14033.0  R6AU           13 dB  23 WPM  CQ            1701Z
+//	DX de M9PSY-#:   14085.0  OH2BH          12 dB  45 BPS  CQ RTTY       1702Z
 func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 	var spotter string
 	switch s.Stream {
@@ -167,7 +168,12 @@ func (s *Spot) FormatDXCluster(defaultSpotter string) string {
 	case StreamDecoder:
 		comment = fmt.Sprintf("%s %d dB", s.Mode, int(s.SNR))
 	case StreamCWSkimmer:
-		comment = fmt.Sprintf("%2d dB  %2d WPM  %-13s", int(s.SNR), s.WPM, s.Comment)
+		// RTTY's and JTTY's speed is baud, which CW Skimmer Server writes BPS.
+		unit := "WPM"
+		if s.Mode == "RTTY" || s.Mode == "JTTY" {
+			unit = "BPS"
+		}
+		comment = fmt.Sprintf("%2d dB  %2d %s  %-13s", int(s.SNR), s.WPM, unit, s.Comment)
 	case StreamVoiceActivity:
 		comment = fmt.Sprintf("%s %d dB", s.VoiceMode, int(s.SNR))
 	case StreamSSTV:
@@ -209,6 +215,7 @@ type decoderEvent struct {
 
 type cwSpotEvent struct {
 	Type        string  `json:"type"`
+	Mode        string  `json:"mode"` // CW, RTTY or JTTY; absent from older UberSDRs (CW)
 	Band        string  `json:"band"`
 	Frequency   float64 `json:"frequency"`
 	Callsign    string  `json:"callsign"`
@@ -380,18 +387,23 @@ func parseCWSpot(data []byte) (*Spot, error) {
 		return nil, nil
 	}
 	ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+	// The skimmer's stream carries CW, RTTY and JTTY spots, saying which in
+	// its mode field; older UberSDRs send none, their stream being CW alone
+	// (RTTY told apart only in the comment). Recording it explicitly keeps
+	// the stored row self-describing, so anything reading the mode column
+	// (the stats API, an SQL query) finds them without knowing stream types.
+	mode := strings.ToUpper(strings.TrimSpace(e.Mode))
+	if mode == "" {
+		mode = "CW"
+	}
 	return &Spot{
-		Stream:    StreamCWSkimmer,
-		Timestamp: ts,
-		Band:      bandForSpot(e.Frequency),
-		Callsign:  e.Callsign,
-		FreqHz:    e.Frequency,
-		SNR:       float64(e.SNR),
-		// The upstream cw_spot event has no mode field — the stream *is* the
-		// mode. Recording it explicitly keeps the stored row self-describing,
-		// so anything reading the mode column (the stats API, an SQL query)
-		// finds CW spots without having to know about stream types.
-		Mode:        "CW",
+		Stream:      StreamCWSkimmer,
+		Timestamp:   ts,
+		Band:        bandForSpot(e.Frequency),
+		Callsign:    e.Callsign,
+		FreqHz:      e.Frequency,
+		SNR:         float64(e.SNR),
+		Mode:        mode,
 		Spotter:     e.Spotter,
 		WPM:         e.WPM,
 		Comment:     e.Comment,
