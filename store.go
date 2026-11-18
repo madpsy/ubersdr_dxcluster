@@ -91,6 +91,10 @@ type SpotStore struct {
 	db *sql.DB
 	in chan Spot
 
+	// writeMu serialises batch inserts against maintenance (purge, vacuum,
+	// checkpoint) so neither side has to fight for the SQLite write lock.
+	writeMu sync.Mutex
+
 	// Voice spot dedup: skip inserting a voice spot if the same
 	// (callsign, freq kHz, voice_mode) was seen within voiceDedupWindow.
 	voiceDedupWindow time.Duration
@@ -104,36 +108,34 @@ type SpotStore struct {
 	decoderDedup       map[string]time.Time // key → last-seen time
 }
 
+// storePragmas are applied to every pooled connection via the DSN. Setting
+// them with db.Exec would only configure whichever single connection the pool
+// happened to hand out, leaving the rest on SQLite defaults.
+//
+// auto_vacuum must be in effect before any table is created to apply to a
+// fresh database. INCREMENTAL mode lets maintenance reclaim freed pages on
+// demand (PRAGMA incremental_vacuum) without the full-file rewrite cost of a
+// plain VACUUM. On an existing DB created without auto_vacuum it is a no-op
+// until a one-off VACUUM converts it — which OpenStore performs below.
+var storePragmas = []string{
+	"auto_vacuum(INCREMENTAL)",
+	"journal_mode(WAL)",
+	"synchronous(NORMAL)",
+	"busy_timeout(10000)",
+	"cache_size(-8000)", // 8 MB
+	"foreign_keys(OFF)",
+}
+
 // OpenStore opens (or creates) the SQLite database at path, applies the
 // schema, and returns a ready-to-use SpotStore.
 func OpenStore(path string) (*SpotStore, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := "file:" + path + "?_pragma=" + strings.Join(storePragmas, "&_pragma=")
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
-
-	// auto_vacuum must be set BEFORE any table is created to take effect on a
-	// fresh database. INCREMENTAL mode lets us reclaim freed pages on demand
-	// (via PRAGMA incremental_vacuum) after each purge, without the full-file
-	// rewrite cost of a plain VACUUM. On an existing DB created without
-	// auto_vacuum, this pragma is a no-op until a one-off VACUUM converts it —
-	// which OpenStore performs below.
-	if _, err := db.Exec("PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
-		return nil, fmt.Errorf("pragma auto_vacuum: %w", err)
-	}
-
-	// Performance PRAGMAs — must be set before any other operations.
-	pragmas := []string{
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous   = NORMAL",
-		"PRAGMA cache_size    = -8000", // 8 MB
-		"PRAGMA temp_store    = MEMORY",
-		"PRAGMA foreign_keys  = OFF",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			return nil, fmt.Errorf("pragma %q: %w", p, err)
-		}
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
 
 	if _, err := db.Exec(createSchema); err != nil {
@@ -254,6 +256,7 @@ func (s *SpotStore) Run() {
 			return
 		}
 		if err := s.insertBatch(batch); err != nil {
+			fatalIfCorrupt("insert batch", err)
 			log.Printf("[store] insert batch error: %v", err)
 		}
 		batch = batch[:0]
@@ -278,6 +281,11 @@ func (s *SpotStore) Run() {
 
 // insertBatch writes a slice of spots in a single transaction.
 func (s *SpotStore) insertBatch(batch []Spot) error {
+	// Maintenance holds writeMu while it runs; inserts wait here and spots
+	// queue up in s.in (4096 deep) rather than failing with SQLITE_BUSY.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -322,39 +330,6 @@ func (s *SpotStore) insertBatch(batch []Spot) error {
 		}
 	}
 	return tx.Commit()
-}
-
-// ── Purge ──────────────────────────────────────────────────────────────────
-
-// RunPurge runs a daily purge of spots older than retainDays.
-// Call in a goroutine.
-func (s *SpotStore) RunPurge(retainDays int) {
-	// Run once at startup (in case the process was down for a while),
-	// then every 24 hours.
-	s.purge(retainDays)
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
-		s.purge(retainDays)
-	}
-}
-
-func (s *SpotStore) purge(retainDays int) {
-	cutoff := time.Now().AddDate(0, 0, -retainDays).Unix()
-	res, err := s.db.Exec(`DELETE FROM spots WHERE ts < ?`, cutoff)
-	if err != nil {
-		log.Printf("[store] purge error: %v", err)
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n > 0 {
-		log.Printf("[store] purged %d spots older than %d days", n, retainDays)
-	}
-	// Checkpoint the WAL, then return freed pages to the OS. With
-	// auto_vacuum=INCREMENTAL, incremental_vacuum shrinks the main DB file by
-	// releasing pages freed by the DELETE above — cheap compared to a full VACUUM.
-	_, _ = s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
-	_, _ = s.db.Exec(`PRAGMA incremental_vacuum`)
 }
 
 // ── Query ──────────────────────────────────────────────────────────────────

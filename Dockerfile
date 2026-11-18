@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# check=skip=FromPlatformFlagConstDisallowed
 # ---------------------------------------------------------------------------
 # Stage 0: build the desktop clients (Fyne, Linux + Windows amd64) from source
 # ---------------------------------------------------------------------------
@@ -33,18 +34,24 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /out/ubersdr_dxcluster ./...
+# Static binary (modernc SQLite is pure Go) so it runs on the Alpine runtime.
+RUN CGO_ENABLED=0 go build -o /out/ubersdr_dxcluster ./...
 
 # ---------------------------------------------------------------------------
 # Stage 2: minimal runtime image
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim
+# Alpine: its sqlite3 CLI is built with SQLITE_ENABLE_DBPAGE_VTAB, which the
+# startup repair in entrypoint.sh needs for ".recover" (Debian's is not).
+FROM alpine:3.20
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
         ca-certificates \
-        wget \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -s /bin/false dxcluster
+        sqlite \
+    && addgroup -S dxcluster \
+    && adduser -S -D -H -u 999 -G dxcluster -s /sbin/nologin dxcluster
+# uid 999 matches the user the previous Debian-based image created, so files
+# in existing bind-mounted /data directories stay writable. (Alpine already
+# uses gid 999 for "ping", so the group takes the next free system gid.)
 
 COPY --from=go-builder /out/ubersdr_dxcluster /usr/local/bin/ubersdr_dxcluster
 
@@ -73,7 +80,9 @@ USER dxcluster
 EXPOSE 6087
 EXPOSE 7300
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Generous start period: entrypoint.sh may spend several minutes checking or
+# repairing a large spot database before the web server starts listening.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15m --retries=3 \
     CMD ["/usr/bin/wget", "-q", "-O", "/dev/null", "http://localhost:6087/"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

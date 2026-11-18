@@ -279,7 +279,7 @@ func main() {
 		log.Printf("  decoder dedup: disabled")
 	}
 	go store.Run()
-	go store.RunPurge(retain)
+	go store.RunMaintenance(retain)
 	log.Printf("  store    : %s (%d spots, %d-day retention)", dbPath, store.Count(), retain)
 
 	// Fetch receiver info from UberSDR — blocks until the upstream answers

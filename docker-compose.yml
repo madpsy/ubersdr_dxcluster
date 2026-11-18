@@ -26,6 +26,12 @@ services:
       # Directory for persistent data (SQLite spot database)
       # DATA_DIR: "/data"
       #
+      # Integrity-check spots.db on startup and, if it is corrupt, move it
+      # aside (spots.db.corrupt-<time>) and salvage what's readable into a new
+      # spots.db (default: true). The app also exits on detecting corruption
+      # at runtime so a restart triggers this repair.
+      # DB_CHECK: "true"
+      #
       # Days of spot history to retain in the database (default: 30)
       # Older spots are purged daily and the DB file is shrunk on disk.
       # RETENTION_DAYS: "30"
